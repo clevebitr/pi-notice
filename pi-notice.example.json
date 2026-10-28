@@ -1,6 +1,9 @@
 {
   "enabled": true,
-  "channels": ["auto"],
+  "locale": "auto",
+  "channels": [
+    "auto"
+  ],
   "events": {
     "settled": true,
     "ask": true,
@@ -9,7 +12,9 @@
     "retry": true,
     "session": true
   },
-  "sessionReasons": ["resume"],
+  "sessionReasons": [
+    "resume"
+  ],
   "minDurationMs": 0,
   "dedupeWindowMs": 1500,
   "debug": false,
@@ -47,7 +52,9 @@
     "topic": "",
     "token": "",
     "priority": "auto",
-    "tags": ["robot"]
+    "tags": [
+      "robot"
+    ]
   },
   "osc": {
     "enabled": false

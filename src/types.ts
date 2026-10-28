@@ -2,6 +2,9 @@ export type ChannelName = "desktop" | "termux" | "ntfy" | "osc";
 
 export type ChannelChoice = ChannelName | "auto";
 
+/** Where a configuration change is written: project file or user-level file. */
+export type ConfigScope = "local" | "global";
+
 export type EventKey = "settled" | "ask" | "todo" | "errors" | "retry" | "session";
 
 export type SessionReason = "startup" | "reload" | "new" | "resume" | "fork";
@@ -86,6 +89,8 @@ export interface OscConfig {
 
 export interface NoticeConfig {
 	enabled: boolean;
+	/** `auto` follows `PI_NOTICE_LOCALE` / `LC_ALL` / `LANG`; otherwise a shipped locale code. */
+	locale: string;
 	channels: ChannelChoice[];
 	events: Record<EventKey, boolean>;
 	sessionReasons: SessionReason[];

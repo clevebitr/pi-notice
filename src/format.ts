@@ -1,3 +1,4 @@
+import { translate as defaultTranslate, type Translator } from "./i18n.ts";
 import type { Notice, NoticeConfig } from "./types.ts";
 
 export interface TodoTask {
@@ -51,10 +52,13 @@ export function stripAnsi(text: string): string {
 }
 
 /** Collapse Markdown into a short single-line summary. */
-export function stripMarkdown(text: string): string {
+export function stripMarkdown(
+	text: string,
+	codeLabel: string = defaultTranslate("summary.code"),
+): string {
 	let out = stripAnsi(text).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
-	out = out.replace(/```[\s\S]*?```/g, " [代码] ");
-	out = out.replace(/~~~[\s\S]*?~~~/g, " [代码] ");
+	out = out.replace(/```[\s\S]*?```/g, ` ${codeLabel} `);
+	out = out.replace(/~~~[\s\S]*?~~~/g, ` ${codeLabel} `);
 	out = out.replace(/!\[[^\]]*]\([^)]*\)/g, "");
 	out = out.replace(/\[([^\]]+)]\([^)]*\)/g, "$1");
 	out = out.replace(/<[^>]+>/g, "");
@@ -81,8 +85,12 @@ export function truncate(text: string, max: number): string {
 	return `${chars.slice(0, Math.max(0, max - 1)).join("")}…`;
 }
 
-export function summarizeReply(text: string, maxChars: number): string | undefined {
-	const summary = stripMarkdown(text);
+export function summarizeReply(
+	text: string,
+	maxChars: number,
+	t: Translator = defaultTranslate,
+): string | undefined {
+	const summary = stripMarkdown(text, t("summary.code"));
 	if (!summary) {
 		return undefined;
 	}
@@ -133,27 +141,32 @@ function trimBody(lines: Array<string | undefined>, maxChars: number): string {
 	return truncate(body, maxChars);
 }
 
-function todoLine(todo: TodoSnapshot | undefined): string | undefined {
+function todoLine(todo: TodoSnapshot | undefined, t: Translator): string | undefined {
 	if (!todo || todo.total === 0) {
 		return undefined;
 	}
 	const current = todo.current;
 	const currentLabel = current ? current.activeForm || current.subject : undefined;
-	const progress = `Todo ${todo.completed}/${todo.total} 完成`;
-	return currentLabel ? `${progress} · 进行中: ${currentLabel}` : progress;
+	const progress = t("notice.todo.progress", { completed: todo.completed, total: todo.total });
+	return currentLabel ? `${progress} · ${t("notice.todo.inProgress", { label: currentLabel })}` : progress;
 }
 
-const STATUS_LABEL: Record<SettledInfo["status"], string> = {
-	completed: "完成",
-	aborted: "已中止",
-	error: "出错",
-};
+function statusLabel(status: SettledInfo["status"], t: Translator): string {
+	return t(`notice.status.${status}`);
+}
 
-export function buildSettledNotice(info: SettledInfo, config: NoticeConfig): Notice {
+export function buildSettledNotice(
+	info: SettledInfo,
+	config: NoticeConfig,
+	t: Translator = defaultTranslate,
+): Notice {
 	const lines: string[] = [];
 
 	if (config.summary.includeDuration) {
-		const meta = [formatDuration(info.durationMs), info.turns > 0 ? `${info.turns} 轮` : undefined]
+		const meta = [
+			formatDuration(info.durationMs),
+			info.turns > 0 ? t("notice.meta.turns", { count: info.turns }) : undefined,
+		]
 			.filter(Boolean)
 			.join(" · ");
 		if (meta) {
@@ -162,29 +175,35 @@ export function buildSettledNotice(info: SettledInfo, config: NoticeConfig): Not
 	}
 
 	if (info.status === "error") {
-		lines.push(`错误: ${truncate(info.error || "模型请求失败", 120)}`);
+		lines.push(
+			t("notice.settled.error", { error: truncate(info.error || t("notice.error.generic"), 120) }),
+		);
 	} else if (info.status === "aborted") {
-		lines.push("已中止，等待你的下一步指令。");
+		lines.push(t("notice.settled.aborted"));
 	} else {
 		const reply =
 			config.summary.includeReply && info.reply
-				? summarizeReply(info.reply, config.summary.maxReplyChars)
+				? summarizeReply(info.reply, config.summary.maxReplyChars, t)
 				: undefined;
-		lines.push(reply ? `↳ ${reply}` : "已完成，等待你的下一步指令。");
+		lines.push(reply ? `↳ ${reply}` : t("notice.settled.done"));
 	}
 
 	if (config.summary.includeTodo) {
-		const line = todoLine(info.todo);
+		const line = todoLine(info.todo, t);
 		if (line) {
 			lines.push(line);
 		}
 	}
 
 	const body = trimBody(lines, config.summary.maxBodyChars);
-	const title = titleWithProject(info.project, STATUS_LABEL[info.status], config.summary.includeProject);
+	const title = titleWithProject(
+		info.project,
+		statusLabel(info.status, t),
+		config.summary.includeProject,
+	);
 	return {
 		title,
-		body: body || "等待你的下一步指令。",
+		body: body || t("common.waiting"),
 		urgency: info.status === "error" ? "high" : info.status === "aborted" ? "low" : "normal",
 		kind: info.status === "error" ? "error" : info.status === "aborted" ? "aborted" : "settled",
 		tag: "settled",
@@ -192,7 +211,7 @@ export function buildSettledNotice(info: SettledInfo, config: NoticeConfig): Not
 }
 
 /** Parse the `todo` extension result (`details.tasks`) into a compact snapshot. */
-export function parseTodoSnapshot(details: unknown, args?: unknown): TodoSnapshot | undefined {
+export function parseTodoSnapshot(details: unknown, args?: unknown, t: Translator = defaultTranslate): TodoSnapshot | undefined {
 	if (!isObject(details)) {
 		return undefined;
 	}
@@ -221,39 +240,54 @@ export function parseTodoSnapshot(details: unknown, args?: unknown): TodoSnapsho
 		inProgress,
 		current: inProgress[0],
 		allDone: visible.length > 0 && completed === visible.length,
-		change: describeTodoChange(action, params, visible),
+		change: describeTodoChange(action, params, visible, t),
 	};
 }
 
-function describeTodoChange(action: string, params: JsonObject, tasks: TodoTask[]): string | undefined {
+function describeTodoChange(
+	action: string,
+	params: JsonObject,
+	tasks: TodoTask[],
+	t: Translator,
+): string | undefined {
 	const id = numberValue(params.id);
 	const task = id === undefined ? undefined : tasks.find((candidate) => candidate.id === id);
 	switch (action) {
 		case "create": {
 			const batch = Array.isArray(params.tasks) ? params.tasks.length : 0;
 			if (batch > 1) {
-				return `新增 ${batch} 个任务`;
+				return t("notice.todo.change.createdMany", { count: batch });
 			}
 			const subject = stringValue(params.subject) ?? tasks[tasks.length - 1]?.subject;
-			return subject ? `新增: ${truncate(subject, 60)}` : "新增任务";
+			return subject
+				? t("notice.todo.change.created", { label: truncate(subject, 60) })
+				: t("notice.todo.change.createdPlain");
 		}
 		case "update": {
 			const status = stringValue(params.status);
 			const label = task?.subject ? `#${id} ${task.subject}` : id !== undefined ? `#${id}` : undefined;
 			if (status === "completed") {
-				return label ? `完成: ${truncate(label, 60)}` : "完成任务";
+				return label
+					? t("notice.todo.change.completed", { label: truncate(label, 60) })
+					: t("notice.todo.change.completedPlain");
 			}
 			if (status === "in_progress") {
-				return label ? `开始: ${truncate(label, 60)}` : "开始任务";
+				return label
+					? t("notice.todo.change.started", { label: truncate(label, 60) })
+					: t("notice.todo.change.startedPlain");
 			}
-			return label ? `更新: ${truncate(label, 60)}` : "更新任务";
+			return label
+				? t("notice.todo.change.updated", { label: truncate(label, 60) })
+				: t("notice.todo.change.updatedPlain");
 		}
 		case "delete": {
 			const label = task?.subject ? `#${id} ${task.subject}` : id !== undefined ? `#${id}` : undefined;
-			return label ? `删除: ${truncate(label, 60)}` : "删除任务";
+			return label
+				? t("notice.todo.change.deleted", { label: truncate(label, 60) })
+				: t("notice.todo.change.deletedPlain");
 		}
 		case "clear":
-			return "清空任务";
+			return t("notice.todo.change.cleared");
 		default:
 			return undefined;
 	}
@@ -263,11 +297,12 @@ export function buildTodoNotice(
 	snapshot: TodoSnapshot,
 	config: NoticeConfig,
 	project: string,
+	t: Translator = defaultTranslate,
 ): Notice {
 	if (snapshot.total === 0) {
 		return {
-			title: titleWithProject(project, "Todo 已清空", config.summary.includeProject),
-			body: trimBody([snapshot.change ?? "任务列表已清空。"], config.summary.maxBodyChars),
+			title: titleWithProject(project, t("notice.todo.clearedTitle"), config.summary.includeProject),
+			body: trimBody([snapshot.change ?? t("notice.todo.clearedBody")], config.summary.maxBodyChars),
 			urgency: "low",
 			kind: "todo",
 			tag: "todo",
@@ -276,16 +311,22 @@ export function buildTodoNotice(
 	const current = snapshot.current;
 	const currentLabel = current ? current.activeForm || current.subject : undefined;
 	const lines = [
-		`完成 ${snapshot.completed}/${snapshot.total}${snapshot.allDone ? " 🎉" : ""}`,
-		currentLabel ? `进行中: ${truncate(currentLabel, 80)}` : undefined,
+		`${t("notice.todo.progress", { completed: snapshot.completed, total: snapshot.total })}${
+			snapshot.allDone ? " 🎉" : ""
+		}`,
+		currentLabel ? t("notice.todo.inProgress", { label: truncate(currentLabel, 80) }) : undefined,
 		snapshot.change,
 	];
 	const title = snapshot.allDone
-		? titleWithProject(project, "Todo 全部完成", config.summary.includeProject)
-		: titleWithProject(project, `Todo ${snapshot.completed}/${snapshot.total}`, config.summary.includeProject);
+		? titleWithProject(project, t("notice.todo.allDone"), config.summary.includeProject)
+		: titleWithProject(
+				project,
+				t("notice.todo.title", { completed: snapshot.completed, total: snapshot.total }),
+				config.summary.includeProject,
+			);
 	return {
 		title,
-		body: trimBody(lines, config.summary.maxBodyChars) || "Todo 已更新",
+		body: trimBody(lines, config.summary.maxBodyChars) || t("notice.todo.updated"),
 		urgency: "low",
 		kind: "todo",
 		tag: "todo",
@@ -302,6 +343,7 @@ export function buildAskNotice(
 	project: string,
 	questions: AskQuestionLike[],
 	config: NoticeConfig,
+	t: Translator = defaultTranslate,
 ): Notice {
 	const first = questions[0];
 	const question = stringValue(first?.question);
@@ -310,43 +352,42 @@ export function buildAskNotice(
 		(total, item) => total + (Array.isArray(item.options) ? item.options.length : 0),
 		0,
 	);
+	const questionsLabel = t("notice.ask.questions", { count: questions.length });
+	const optionsLabel = t("notice.ask.options", { count: optionCount });
 	const meta =
 		questions.length > 1
-			? `共 ${questions.length} 个问题${optionCount > 0 ? ` · ${optionCount} 个选项` : ""}`
+			? optionCount > 0
+				? t("notice.ask.multi", { questions: questionsLabel, options: optionsLabel })
+				: questionsLabel
 			: optionCount > 0
-				? `${optionCount} 个选项`
+				? optionsLabel
 				: undefined;
 	const lines = [
-		header && question ? `${header}: ${question}` : question ?? "Pi 正在等待你的回答。",
+		header && question ? `${header}: ${question}` : question ?? t("notice.ask.waiting"),
 		meta,
 	];
 	return {
-		title: titleWithProject(project, "需要你的回答", config.summary.includeProject),
-		body: trimBody(lines, config.summary.maxBodyChars) || "Pi 正在等待你的回答。",
+		title: titleWithProject(project, t("notice.ask.title"), config.summary.includeProject),
+		body: trimBody(lines, config.summary.maxBodyChars) || t("notice.ask.waiting"),
 		urgency: "high",
 		kind: "ask",
 		tag: "ask",
 	};
 }
 
-const UI_PROMPT_LABEL: Record<string, string> = {
-	confirm: "等待确认",
-	select: "等待选择",
-	input: "等待输入",
-	editor: "等待编辑",
-	custom: "等待操作",
-};
-
 export function buildUiPromptNotice(
 	project: string,
 	kind: string,
 	title: string | undefined,
 	config: NoticeConfig,
+	t: Translator = defaultTranslate,
 ): Notice {
-	const label = UI_PROMPT_LABEL[kind] ?? "等待操作";
+	const key = `notice.ui.${kind}`;
+	const translated = t(key);
+	const label = translated === key ? t("notice.ui.default") : translated;
 	return {
 		title: titleWithProject(project, label, config.summary.includeProject),
-		body: trimBody([title || "Pi 正在等待你在终端中操作。"], config.summary.maxBodyChars),
+		body: trimBody([title || t("notice.ui.body")], config.summary.maxBodyChars),
 		urgency: "high",
 		kind: "ask",
 		tag: `ui-${kind}`,
@@ -357,10 +398,14 @@ export function buildErrorNotice(
 	project: string,
 	error: string,
 	config: NoticeConfig,
+	t: Translator = defaultTranslate,
 ): Notice {
 	return {
-		title: titleWithProject(project, "出错", config.summary.includeProject),
-		body: trimBody([truncate(error || "模型请求失败", config.summary.maxBodyChars)], config.summary.maxBodyChars),
+		title: titleWithProject(project, t("notice.status.error"), config.summary.includeProject),
+		body: trimBody(
+			[truncate(error || t("notice.error.generic"), config.summary.maxBodyChars)],
+			config.summary.maxBodyChars,
+		),
 		urgency: "high",
 		kind: "error",
 		tag: "error",
@@ -372,11 +417,16 @@ export function buildRetryNotice(
 	attempt: number,
 	error: string | undefined,
 	config: NoticeConfig,
+	t: Translator = defaultTranslate,
 ): Notice {
 	return {
-		title: titleWithProject(project, `重试中 (${attempt})`, config.summary.includeProject),
+		title: titleWithProject(
+			project,
+			t("notice.retry.title", { attempt }),
+			config.summary.includeProject,
+		),
 		body: trimBody(
-			["连接中断，正在自动重连…", error ? truncate(error, 120) : undefined],
+			[t("notice.retry.body"), error ? truncate(error, 120) : undefined],
 			config.summary.maxBodyChars,
 		),
 		urgency: "high",
@@ -389,10 +439,11 @@ export function buildRecoveredNotice(
 	project: string,
 	attempt: number,
 	config: NoticeConfig,
+	t: Translator = defaultTranslate,
 ): Notice {
 	return {
-		title: titleWithProject(project, "已恢复连接", config.summary.includeProject),
-		body: trimBody([`第 ${attempt} 次重试成功，继续执行。`], config.summary.maxBodyChars),
+		title: titleWithProject(project, t("notice.recovered.title"), config.summary.includeProject),
+		body: trimBody([t("notice.recovered.body", { attempt })], config.summary.maxBodyChars),
 		urgency: "normal",
 		kind: "recovered",
 		tag: "recovered",
@@ -403,24 +454,32 @@ export function buildSessionNotice(
 	project: string,
 	reason: string,
 	config: NoticeConfig,
+	t: Translator = defaultTranslate,
 ): Notice {
+	const key = `notice.session.reason.${reason}`;
+	const translated = t(key);
+	const reasonLabel = translated === key ? reason : translated;
 	return {
-		title: titleWithProject(project, "会话已恢复", config.summary.includeProject),
-		body: trimBody([`已重新连接（${reason}），等待你的指令。`], config.summary.maxBodyChars),
+		title: titleWithProject(project, t("notice.session.title"), config.summary.includeProject),
+		body: trimBody([t("notice.session.body", { reason: reasonLabel })], config.summary.maxBodyChars),
 		urgency: "low",
 		kind: "session",
 		tag: "session",
 	};
 }
 
-export function buildTestNotice(project: string, channels: string[]): Notice {
+export function buildTestNotice(
+	project: string,
+	channels: string[],
+	t: Translator = defaultTranslate,
+): Notice {
 	return {
-		title: "Pi · 通知测试",
+		title: `Pi · ${t("notice.test.title")}`,
 		body: trimBody(
 			[
-				`项目: ${project}`,
-				`通道: ${channels.join(", ") || "未配置"}`,
-				`时间: ${new Date().toLocaleString()}`,
+				t("notice.test.project", { project }),
+				t("notice.test.channels", { channels: channels.join(", ") || t("notice.test.none") }),
+				t("notice.test.time", { time: new Date().toLocaleString() }),
 			],
 			220,
 		),

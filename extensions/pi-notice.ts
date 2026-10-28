@@ -1,6 +1,9 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Container, SettingsList, type SettingItem } from "@earendil-works/pi-tui";
 
-import { loadConfig } from "../src/config.ts";
+import { helpText, parseCommand, type CommandScope } from "../src/commands.ts";
+import { EVENT_KEYS, configFilePath, loadConfig, writeConfigPatch } from "../src/config.ts";
 import {
 	buildAskNotice,
 	buildErrorNotice,
@@ -16,8 +19,10 @@ import {
 	type AskQuestionLike,
 	type TodoSnapshot,
 } from "../src/format.ts";
+import { LOCALES, getLocale, localeLabel, setLocale, translate as t } from "../src/i18n.ts";
 import { NoticeDispatcher } from "../src/notify.ts";
-import type { Notice, NoticeConfig, SessionReason } from "../src/types.ts";
+import { applyPanelItem, buildPanelItems } from "../src/panel.ts";
+import type { EventKey, Notice, NoticeConfig, SessionReason } from "../src/types.ts";
 
 interface RuntimeState {
 	config?: NoticeConfig;
@@ -88,6 +93,17 @@ function errorKey(error: string | undefined): string {
 	return (error || "unknown").slice(0, 60);
 }
 
+/** Environment variables that win over the JSON files, surfaced in status. */
+const ENV_OVERRIDES = [
+	"PI_NOTICE_CONFIG",
+	"PI_NOTICE_DISABLED",
+	"PI_NOTICE_CHANNELS",
+	"PI_NOTICE_EVENTS",
+	"PI_NOTICE_SESSION_REASONS",
+	"PI_NOTICE_QUIET_HOURS",
+	"PI_NOTICE_MIN_DURATION_MS",
+] as const;
+
 function cancelTimer(timer: NodeJS.Timeout | undefined): undefined {
 	if (timer) {
 		clearTimeout(timer);
@@ -98,6 +114,8 @@ function cancelTimer(timer: NodeJS.Timeout | undefined): undefined {
 export interface NoticeDeps {
 	/** Inject a dispatcher in tests; production creates one from config. */
 	dispatcher?: NoticeDispatcher;
+	/** Environment used for config discovery and persistence (tests). */
+	env?: NodeJS.ProcessEnv;
 }
 
 export default function piNotice(pi: ExtensionAPI, deps: NoticeDeps = {}): void {
@@ -113,11 +131,12 @@ export default function piNotice(pi: ExtensionAPI, deps: NoticeDeps = {}): void 
 	};
 
 	const reload = (cwd: string): void => {
-		const loaded = loadConfig(cwd);
+		const loaded = loadConfig(cwd, deps.env ?? process.env);
 		state.config = loaded.config;
 		state.sources = loaded.sources;
 		state.warnings = loaded.warnings;
 		state.cwd = cwd;
+		setLocale(loaded.config.locale, env());
 		if (deps.dispatcher) {
 			state.dispatcher = deps.dispatcher;
 			state.dispatcher.setConfig(loaded.config);
@@ -145,6 +164,57 @@ export default function piNotice(pi: ExtensionAPI, deps: NoticeDeps = {}): void 
 	const send = (notice: Notice, key?: string): void => {
 		void state.dispatcher?.send(notice, { key });
 	};
+
+	const env = (): NodeJS.ProcessEnv => deps.env ?? process.env;
+
+	/** Notifications are advisory: a UI or rendering failure must never break a turn. */
+	const notifyUi = (
+		ctx: Pick<ExtensionContext, "ui" | "hasUI">,
+		message: string,
+		type: "info" | "warning" | "error" = "info",
+	): void => {
+		if (!ctx.hasUI || typeof ctx.ui?.notify !== "function") {
+			return;
+		}
+		try {
+			ctx.ui.notify(message, type);
+		} catch {
+			// ignore
+		}
+	};
+
+	/**
+	 * Footer hint in the TUI: only shown when something is notifying differently
+	 * from the default (global off, or a subset of events disabled).
+	 */
+	const syncStatus = (ctx?: Pick<ExtensionContext, "ui" | "hasUI" | "mode">): void => {
+		if (!ctx || ctx.mode !== "tui" || typeof ctx.ui?.setStatus !== "function") {
+			return;
+		}
+		try {
+			const current = config();
+			if (!current) {
+				return;
+			}
+			if (!(state.dispatcher?.isEnabled() ?? current.enabled)) {
+				ctx.ui.setStatus("pi-notice", `🔕 ${t("status.footer.off")}`);
+				return;
+			}
+			const disabled = EVENT_KEYS.filter((key) => !current.events[key]);
+			ctx.ui.setStatus(
+				"pi-notice",
+				disabled.length > 0
+					? `🔔 ${t("status.footer.partial", { events: disabled.join(",") })}`
+					: undefined,
+			);
+		} catch {
+			// ignore
+		}
+	};
+
+	/** `session` scope never touches disk. */
+	const writeScope = (cwd: string, scope: CommandScope): string | undefined =>
+		scope === "session" ? undefined : configFilePath(cwd, scope, env());
 
 	const flushTodo = (): void => {
 		state.todoTimer = cancelTimer(state.todoTimer);
@@ -184,6 +254,7 @@ export default function piNotice(pi: ExtensionAPI, deps: NoticeDeps = {}): void 
 		state.todo = undefined;
 
 		const current = config();
+		syncStatus(ctx);
 		if (
 			current?.events.session &&
 			current.sessionReasons.includes(event.reason as SessionReason)
@@ -195,9 +266,16 @@ export default function piNotice(pi: ExtensionAPI, deps: NoticeDeps = {}): void 
 		}
 	});
 
-	pi.on("session_shutdown", () => {
+	pi.on("session_shutdown", (_event, ctx) => {
 		state.todoTimer = cancelTimer(state.todoTimer);
 		state.pendingTodo = undefined;
+		if (ctx?.mode === "tui" && typeof ctx.ui?.setStatus === "function") {
+			try {
+				ctx.ui.setStatus("pi-notice", undefined);
+			} catch {
+				// ignore
+			}
+		}
 	});
 
 	pi.on("agent_start", () => {
@@ -414,69 +492,314 @@ export default function piNotice(pi: ExtensionAPI, deps: NoticeDeps = {}): void 
 		);
 	});
 
+	const openPanel = async (ctx: ExtensionContext): Promise<void> => {
+		if (ctx.mode !== "tui" || typeof ctx.ui?.custom !== "function") {
+			notifyUi(ctx, t("cmd.tuiOnly"), "warning");
+			return;
+		}
+		ensure(ctx.cwd);
+		const items = buildPanelItems(config()!, t);
+		const target = configFilePath(ctx.cwd, "local", env());
+		await ctx.ui.custom((tui, theme, _keybindings, done) => {
+			const list = new SettingsList(
+				items as SettingItem[],
+				Math.min(items.length + 2, 15),
+				getSettingsListTheme(),
+				(id, newValue) => {
+					const patch = applyPanelItem(id, newValue, config()!, t);
+					if (!patch) {
+						return;
+					}
+					writeConfigPatch(target, patch as Record<string, unknown>);
+					reload(ctx.cwd);
+					syncStatus(ctx);
+				},
+				() => done(undefined),
+				{ enableSearch: true },
+			);
+
+			const container = new Container();
+			container.addChild(
+				new (class {
+					render(): string[] {
+						return [theme.fg("accent", theme.bold(t("panel.title"))), ""];
+					}
+					invalidate(): void {}
+				})(),
+			);
+			container.addChild(list);
+
+			return {
+				render(width: number): string[] {
+					return container.render(width);
+				},
+				invalidate(): void {
+					container.invalidate();
+				},
+				handleInput(data: string): void {
+					list.handleInput?.(data);
+					tui.requestRender();
+				},
+			};
+		});
+	};
+
 	pi.registerCommand("notice", {
-		description: "查看或控制 pi-notice（on/off/toggle/test/status/reload）",
+		description: t("cmd.desc"),
 		handler: async (args, ctx) => {
 			const dispatcher = ensure(ctx.cwd);
+			const command = parseCommand(args);
 			const current = config()!;
-			const action = (args.trim().split(/\s+/)[0] || "status").toLowerCase();
+			const scopeLabel = (scope: CommandScope): string =>
+				scope === "session" ? t("cmd.scope.session") : configFilePath(ctx.cwd, scope, env());
 
-			switch (action) {
-				case "on":
-					dispatcher.setEnabled(true);
-					ctx.ui.notify("pi-notice: 已开启", "info");
+			const eventUpdates = (
+				keys: EventKey[],
+				enabled: boolean | undefined,
+			): Partial<Record<EventKey, boolean>> => {
+				const updates: Partial<Record<EventKey, boolean>> = {};
+				for (const key of keys) {
+					updates[key] = enabled ?? !current.events[key];
+				}
+				return updates;
+			};
+
+			const describe = (updates: Partial<Record<EventKey, boolean>>): string =>
+				Object.entries(updates)
+					.map(([key, value]) => `${key}=${value ? t("common.on") : t("common.off")}`)
+					.join(", ");
+
+			switch (command.type) {
+				case "help":
+					notifyUi(ctx, helpText(t));
 					return;
-				case "off":
-					dispatcher.setEnabled(false);
-					ctx.ui.notify("pi-notice: 已关闭（本次运行）", "info");
+				case "error":
+					notifyUi(ctx, `pi-notice: ${t(`cmd.error.${command.code}`, command.vars)}`, "warning");
 					return;
-				case "toggle":
-					dispatcher.setEnabled(!dispatcher.isEnabled());
-					ctx.ui.notify(`pi-notice: 已${dispatcher.isEnabled() ? "开启" : "关闭"}`, "info");
+				case "panel":
+					await openPanel(ctx);
 					return;
 				case "reload":
 					reload(ctx.cwd);
-					ctx.ui.notify("pi-notice: 配置已重新加载", "info");
+					syncStatus(ctx);
+					notifyUi(ctx, t("cmd.reloaded"));
 					return;
 				case "test": {
 					const result = await dispatcher.send(
-						buildTestNotice(project(), dispatcher.channelNames()),
+						buildTestNotice(project(), dispatcher.channelNames(), t),
 						{ force: true },
 					);
 					const ok = result.filter((item) => item.ok).map((item) => item.name);
 					const failed = result.filter((item) => !item.ok);
 					const lines = [
-						ok.length > 0 ? `成功: ${ok.join(", ")}` : "没有通道发送成功",
-						...failed.map((item) => `${item.name}: ${item.error ?? "失败"}`),
+						ok.length > 0 ? t("cmd.test.ok", { names: ok.join(", ") }) : t("cmd.test.none"),
+						...failed.map(
+							(item) => `${item.name}: ${item.error ?? t("cmd.test.none")}`,
+						),
 					];
-					ctx.ui.notify(`pi-notice 测试\n${lines.join("\n")}`, failed.length ? "warning" : "info");
+					notifyUi(
+						ctx,
+						`${t("cmd.test.title")}\n${lines.join("\n")}`,
+						failed.length ? "warning" : "info",
+					);
 					return;
 				}
+				case "enabled": {
+					const target = writeScope(ctx.cwd, command.scope);
+					if (target) {
+						writeConfigPatch(target, { enabled: command.enabled });
+						reload(ctx.cwd);
+					} else {
+						dispatcher.setEnabled(command.enabled);
+					}
+					syncStatus(ctx);
+					notifyUi(
+						ctx,
+						t(command.enabled ? "cmd.enabled.on" : "cmd.enabled.off", {
+							scope: scopeLabel(command.scope),
+						}),
+					);
+					return;
+				}
+				case "events": {
+					const updates = eventUpdates(command.events, command.enabled);
+					const target = writeScope(ctx.cwd, command.scope);
+					if (target) {
+						writeConfigPatch(target, { events: updates });
+						reload(ctx.cwd);
+					} else {
+						Object.assign(current.events, updates);
+						dispatcher.setConfig(current);
+					}
+					syncStatus(ctx);
+					notifyUi(
+						ctx,
+						t("cmd.events.applied", {
+							changes: describe(updates),
+							scope: scopeLabel(command.scope),
+						}),
+					);
+					return;
+				}
+				case "channels": {
+					const target = writeScope(ctx.cwd, command.scope);
+					if (target) {
+						writeConfigPatch(target, { channels: command.channels });
+						reload(ctx.cwd);
+					} else {
+						current.channels = command.channels;
+						dispatcher.setConfig(current);
+					}
+					const warnings = dispatcher.channelWarnings();
+					notifyUi(
+						ctx,
+						[
+							t("cmd.channels.applied", {
+								names: dispatcher.channelNames().join(", ") || t("common.none"),
+								scope: scopeLabel(command.scope),
+							}),
+							...warnings.map((warning) => t("cmd.note", { message: warning })),
+						].join("\n"),
+						warnings.length > 0 ? "warning" : "info",
+					);
+					return;
+				}
+				case "reasons": {
+					const target = writeScope(ctx.cwd, command.scope);
+					if (target) {
+						writeConfigPatch(target, { sessionReasons: command.reasons });
+						reload(ctx.cwd);
+					} else {
+						current.sessionReasons = command.reasons;
+						dispatcher.setConfig(current);
+					}
+					notifyUi(
+						ctx,
+						t("cmd.reasons.applied", {
+							reasons: config()!.sessionReasons.join(", ") || t("common.none"),
+							scope: scopeLabel(command.scope),
+						}),
+					);
+					return;
+				}
+				case "locale": {
+					const target = writeScope(ctx.cwd, command.scope);
+					if (target) {
+						writeConfigPatch(target, { locale: command.locale });
+						reload(ctx.cwd);
+					} else {
+						current.locale = command.locale;
+						setLocale(command.locale, env());
+						dispatcher.setConfig(current);
+					}
+					syncStatus(ctx);
+					notifyUi(
+						ctx,
+						t("cmd.locale.applied", {
+							locale: localeLabel(command.locale),
+							scope: scopeLabel(command.scope),
+						}),
+					);
+					return;
+				}
+				case "list-events": {
+					const lines = [
+						t("cmd.events.title"),
+						...EVENT_KEYS.map(
+							(key) =>
+								`${current.events[key] ? "✓" : "✗"} ${key.padEnd(8)}${t(`cmd.events.label.${key}`)}`,
+						),
+						t("cmd.events.reasons", {
+							reasons: current.sessionReasons.join(", ") || t("common.none"),
+						}),
+						t("cmd.events.hint"),
+					];
+					notifyUi(ctx, lines.join("\n"));
+					return;
+				}
+				case "list-channels": {
+					const warnings = dispatcher.channelWarnings();
+					notifyUi(
+						ctx,
+						[
+							t("cmd.channels.title", {
+								names: dispatcher.channelNames().join(", ") || t("common.none"),
+							}),
+							t("cmd.channels.config", { values: current.channels.join(", ") }),
+							...warnings.map((warning) => t("cmd.note", { message: warning })),
+						].join("\n"),
+						warnings.length > 0 ? "warning" : "info",
+					);
+					return;
+				}
+				case "list-reasons":
+					notifyUi(
+						ctx,
+						[
+							t("cmd.reasons.title", {
+								reasons: current.sessionReasons.join(", ") || t("common.none"),
+							}),
+							t("cmd.reasons.hint"),
+						].join("\n"),
+					);
+					return;
+				case "list-locales":
+					notifyUi(
+						ctx,
+						[
+							`${t("panel.row.locale")}: ${localeLabel(getLocale())}`,
+							LOCALES.map((locale) => `${locale.label} (${locale.code})`).join(", "),
+							"/notice locale zh-CN",
+						].join("\n"),
+					);
+					return;
 				case "status":
 				default: {
-					const events = Object.entries(current.events)
-						.filter(([, enabled]) => enabled)
-						.map(([name]) => name)
-						.join(", ");
+					const enabledEvents = EVENT_KEYS.filter((key) => current.events[key]);
 					const tools = pi.getAllTools().map((tool) => tool.name);
 					const lines = [
-						`pi-notice: ${dispatcher.isEnabled() ? "开启" : "关闭"}`,
-						`通道: ${dispatcher.channelNames().join(", ") || "无"}`,
-						`事件: ${events || "无"}`,
-						`静默时段: ${
-							current.quietHours.enabled
+						t("cmd.status.title", {
+							state: dispatcher.isEnabled() ? t("common.on") : t("common.off"),
+						}),
+						t("cmd.status.channels", {
+							names: dispatcher.channelNames().join(", ") || t("common.none"),
+							configured: current.channels.join(", "),
+						}),
+						t("cmd.status.events", {
+							events: enabledEvents.join(", ") || t("common.none"),
+							hint:
+								enabledEvents.length < EVENT_KEYS.length ? t("cmd.status.eventsHint") : "",
+						}),
+						t("cmd.status.reasons", {
+							reasons: current.sessionReasons.join(", ") || t("common.none"),
+						}),
+						t("cmd.status.quiet", {
+							range: current.quietHours.enabled
 								? `${current.quietHours.start}-${current.quietHours.end}`
-								: "关闭"
-						}`,
-						`todo 工具: ${tools.includes("todo") ? "已安装" : "未检测到"}`,
-						`ask 事件: rpiv:ask-user:prompt`,
-						`配置: ${state.sources.length > 0 ? state.sources.join(", ") : "默认配置"}`,
+								: t("cmd.status.quietOff"),
+						}),
+						t("cmd.status.todo", {
+							state: tools.includes("todo")
+								? t("cmd.status.todoInstalled")
+								: t("cmd.status.todoMissing"),
+						}),
+						t("cmd.status.config", {
+							sources:
+								state.sources.length > 0
+									? state.sources.join(", ")
+									: t("cmd.status.defaultConfig"),
+						}),
+						`${t("panel.row.locale")}: ${localeLabel(getLocale())}`,
 					];
 					const warnings = [...state.warnings, ...dispatcher.channelWarnings()];
-					if (warnings.length > 0) {
-						lines.push(...warnings.map((warning) => `注意: ${warning}`));
+					const overrides = ENV_OVERRIDES.filter((name) => env()[name]?.trim());
+					if (overrides.length > 0) {
+						lines.push(t("cmd.status.envOverrides", { names: overrides.join(", ") }));
 					}
-					ctx.ui.notify(lines.join("\n"), "info");
+					if (warnings.length > 0) {
+						lines.push(...warnings.map((warning) => t("cmd.note", { message: warning })));
+					}
+					notifyUi(ctx, lines.join("\n"), warnings.length > 0 ? "warning" : "info");
 					return;
 				}
 			}

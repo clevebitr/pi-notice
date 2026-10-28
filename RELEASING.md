@@ -7,7 +7,8 @@ This package uses **npm Trusted Publisher (OIDC)** for releases. No long-lived
 
 npm cannot attach a trusted publisher until the package exists on the registry.
 The first version must be published manually (2FA/OTP) or with a temporary
-token. This repository is currently at `0.1.0` and has not been published yet.
+token. `0.1.0` is published; `0.2.0` added TUI subcommands, `0.3.0` adds the
+settings panel, i18n (en / zh-CN / zh-TW), and the localization page.
 
 ```bash
 cd F:/Projetcs/pi-notice

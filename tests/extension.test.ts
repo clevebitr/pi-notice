@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -8,9 +8,13 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import piNotice from "../extensions/pi-notice.ts";
 import { loadConfig } from "../src/config.ts";
+import { setLocale } from "../src/i18n.ts";
 import { NoticeDispatcher } from "../src/notify.ts";
 import type { Channel } from "../src/channels/types.ts";
 import type { Notice, NoticeConfig } from "../src/types.ts";
+
+// Notification and command texts are asserted in Simplified Chinese.
+setLocale("zh-CN");
 
 type Handler = (event?: any, ctx?: any) => unknown;
 
@@ -75,14 +79,24 @@ async function withRuntime(
 		dir: string;
 		channel: ReturnType<typeof fakeChannel>;
 		pi: ReturnType<typeof createPi>;
-		ctx: { cwd: string; ui: { notify: (...args: any[]) => void }; hasUI: boolean };
+		ctx: { cwd: string; mode: string; ui: { notify: (...args: any[]) => void; setStatus: (...args: any[]) => void }; hasUI: boolean };
 		config: NoticeConfig;
+		messages: string[];
+		statuses: Array<string | undefined>;
+		env: NodeJS.ProcessEnv;
 	}) => Promise<void>,
 ): Promise<void> {
 	const dir = mkdtempSync(join(tmpdir(), "pi-notice-ext-"));
 	mkdirSync(join(dir, ".pi"), { recursive: true });
-	writeFileSync(join(dir, ".pi", "pi-notice.json"), JSON.stringify(configData), "utf8");
-	const config = loadConfig(dir).config;
+	// Pin the language: assertions below match Simplified Chinese texts.
+	writeFileSync(
+		join(dir, ".pi", "pi-notice.json"),
+		JSON.stringify({ locale: "zh-CN", ...configData }),
+		"utf8",
+	);
+	// Keep `--global` writes inside the sandbox instead of the real home directory.
+	const env: NodeJS.ProcessEnv = { ...process.env, PI_NOTICE_CONFIG: join(dir, "global.json") };
+	const config = loadConfig(dir, env).config;
 	const channel = fakeChannel();
 	const dispatcher = new NoticeDispatcher({
 		config,
@@ -90,15 +104,20 @@ async function withRuntime(
 		logger: { debug: () => {}, warn: () => {} },
 	});
 	const pi = createPi();
-	piNotice(pi.api, { dispatcher });
+	piNotice(pi.api, { dispatcher, env });
 	const uiNotices: string[] = [];
+	const statuses: Array<string | undefined> = [];
 	const ctx = {
 		cwd: dir,
-		ui: { notify: (message: string) => uiNotices.push(message) },
+		mode: "tui",
+		ui: {
+			notify: (message: string) => uiNotices.push(message),
+			setStatus: (_key: string, text?: string) => statuses.push(text),
+		},
 		hasUI: true,
 	};
 	try {
-		await fn({ dir, channel, pi, ctx, config });
+		await fn({ dir, channel, pi, ctx, config, messages: uiNotices, statuses, env });
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -281,5 +300,137 @@ test("/notice status and test commands run without a real channel", async () => 
 		await command?.handler("test", ctx);
 		await tick();
 		assert.equal(channel.sent.filter((item) => item.kind === "test").length, 1);
+	});
+});
+
+async function runNotice(
+	pi: ReturnType<typeof createPi>,
+	args: string,
+	ctx: { cwd: string; ui: { notify: (...args: any[]) => void; setStatus?: (...args: any[]) => void }; hasUI: boolean },
+): Promise<void> {
+	const command = pi.commands.get("notice");
+	assert.ok(command, "notice command is registered");
+	await command.handler(args, ctx as any);
+}
+
+function readProjectConfig(dir: string): Record<string, any> | undefined {
+	try {
+		return JSON.parse(readFileSync(join(dir, ".pi", "pi-notice.json"), "utf8"));
+	} catch {
+		return undefined;
+	}
+}
+
+test("/notice off <event> persists and suppresses only that event", async () => {
+	await withRuntime({}, async ({ channel, pi, ctx, dir, statuses }) => {
+		await pi.emit("session_start", startup, ctx);
+		await runNotice(pi, "off todo", ctx);
+		assert.equal(readProjectConfig(dir)?.events?.todo, false);
+		assert.equal(statuses.at(-1), "🔔 通知 -todo");
+
+		await pi.emit("tool_execution_end", {
+			toolName: "todo",
+			isError: false,
+			result: {
+				details: { action: "update", tasks: [{ id: 1, subject: "做完", status: "completed" }] },
+			},
+		});
+		await tick();
+		assert.equal(channel.sent.filter((item) => item.kind === "todo").length, 0);
+
+		await runNotice(pi, "on todo", ctx);
+		assert.equal(readProjectConfig(dir)?.events?.todo, true);
+		await pi.emit("tool_execution_end", {
+			toolName: "todo",
+			isError: false,
+			result: {
+				details: { action: "update", tasks: [{ id: 1, subject: "做完", status: "completed" }] },
+			},
+		});
+		await tick();
+		assert.equal(channel.sent.filter((item) => item.kind === "todo").length, 1);
+	});
+});
+
+test("/notice off disables the extension and --session skips the file", async () => {
+	await withRuntime({}, async ({ channel, pi, ctx, dir }) => {
+		await pi.emit("session_start", startup, ctx);
+		await runNotice(pi, "--session off", ctx);
+		assert.equal(readProjectConfig(dir)?.enabled, undefined);
+
+		await pi.emit("agent_start");
+		await pi.emit("turn_start", { turnIndex: 0 });
+		await pi.emit("agent_settled", { aborted: false });
+		await tick();
+		assert.equal(channel.sent.length, 0);
+
+		await runNotice(pi, "on", ctx);
+		assert.equal(readProjectConfig(dir)?.enabled, true);
+		await pi.emit("agent_start");
+		await pi.emit("turn_start", { turnIndex: 0 });
+		await pi.emit("agent_settled", { aborted: false });
+		await tick();
+		assert.equal(channel.sent.filter((item) => item.kind === "settled").length, 1);
+	});
+});
+
+test("/notice --global writes the user config file", async () => {
+	await withRuntime({}, async ({ pi, ctx, dir }) => {
+		await runNotice(pi, "--global off settled", ctx);
+		assert.equal(readProjectConfig(dir)?.events?.settled, undefined);
+		const globalConfig = JSON.parse(readFileSync(join(dir, "global.json"), "utf8"));
+		assert.equal(globalConfig.events.settled, false);
+	});
+});
+
+test("/notice events, toggle and Chinese aliases", async () => {
+	await withRuntime({}, async ({ pi, ctx, messages, dir }) => {
+		await runNotice(pi, "events", ctx);
+		assert.match(messages.at(-1) ?? "", /✓ settled/);
+
+		await runNotice(pi, "toggle 待办", ctx);
+		assert.equal(readProjectConfig(dir)?.events?.todo, false);
+
+		await runNotice(pi, "on 结束", ctx);
+		assert.equal(readProjectConfig(dir)?.events?.settled, true);
+
+		await runNotice(pi, "off all", ctx);
+		const events = readProjectConfig(dir)?.events ?? {};
+		assert.deepEqual(Object.keys(events).sort(), ["ask", "errors", "retry", "session", "settled", "todo"]);
+		assert.ok(Object.values(events).every((value) => value === false));
+	});
+});
+
+test("/notice rejects unknown events and keeps the file untouched", async () => {
+	await withRuntime({}, async ({ pi, ctx, messages, dir }) => {
+		await runNotice(pi, "off nope", ctx);
+		assert.match(messages.at(-1) ?? "", /未知事件/);
+		assert.equal(readProjectConfig(dir)?.events, undefined);
+	});
+});
+
+test("/notice channels and reasons persist", async () => {
+	await withRuntime({}, async ({ pi, ctx, dir }) => {
+		await runNotice(pi, "channels auto,ntfy", ctx);
+		const config = readProjectConfig(dir);
+		assert.deepEqual(config?.channels, ["auto", "ntfy"]);
+		assert.deepEqual(config?.ntfy?.topic, undefined);
+
+		await runNotice(pi, "reasons resume,new", ctx);
+		assert.deepEqual(readProjectConfig(dir)?.sessionReasons, ["resume", "new"]);
+	});
+});
+
+test("/notice opens the panel only when a TUI is available", async () => {
+	await withRuntime({}, async ({ pi, dir }) => {
+		const messages: string[] = [];
+		const headless = {
+			cwd: dir,
+			mode: "print",
+			ui: { notify: (message: string) => messages.push(message) },
+			hasUI: true,
+		};
+		await runNotice(pi, "", headless);
+		assert.match(messages.at(-1) ?? "", /TUI/);
 	});
 });

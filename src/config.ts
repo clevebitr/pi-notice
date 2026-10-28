@@ -1,22 +1,25 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
+import { normalizeLocale } from "./i18n.ts";
 import type {
 	ChannelChoice,
 	ChannelName,
+	ConfigScope,
 	EventKey,
 	LoadedConfig,
 	NoticeConfig,
 	SessionReason,
 } from "./types.ts";
 
-const CHANNEL_NAMES: readonly ChannelName[] = ["desktop", "termux", "ntfy", "osc"];
-const EVENT_KEYS: readonly EventKey[] = ["settled", "ask", "todo", "errors", "retry", "session"];
-const SESSION_REASONS: readonly SessionReason[] = ["startup", "reload", "new", "resume", "fork"];
+export const CHANNEL_NAMES: readonly ChannelName[] = ["desktop", "termux", "ntfy", "osc"];
+export const EVENT_KEYS: readonly EventKey[] = ["settled", "ask", "todo", "errors", "retry", "session"];
+export const SESSION_REASONS: readonly SessionReason[] = ["startup", "reload", "new", "resume", "fork"];
 
 export const DEFAULT_CONFIG: NoticeConfig = {
 	enabled: true,
+	locale: "auto",
 	channels: ["auto"],
 	events: {
 		settled: true,
@@ -119,6 +122,7 @@ function normalizeConfig(input: unknown): NoticeConfig {
 	const config = mergeConfig(clone(DEFAULT_CONFIG), input) as NoticeConfig;
 
 	config.enabled = asBoolean(config.enabled, true);
+	config.locale = normalizeLocale(asString(config.locale, "auto")) ?? "auto";
 	config.channels = Array.isArray(config.channels)
 		? config.channels.filter(
 				(value): value is ChannelChoice =>
@@ -277,6 +281,9 @@ function applyEnv(config: NoticeConfig, env: NodeJS.ProcessEnv): NoticeConfig {
 	if (["1", "true", "yes", "on"].includes((env.PI_NOTICE_DISABLED ?? "").toLowerCase())) {
 		config.enabled = false;
 	}
+	if (env.PI_NOTICE_LOCALE?.trim()) {
+		config.locale = env.PI_NOTICE_LOCALE.trim();
+	}
 	if (env.PI_NOTICE_CHANNELS?.trim()) {
 		config.channels = env.PI_NOTICE_CHANNELS.split(",")
 			.map((value) => value.trim())
@@ -349,6 +356,42 @@ export function loadConfig(cwd: string, env: NodeJS.ProcessEnv = process.env): L
 
 	const config = applyEnv(normalizeConfig(merged), env);
 	return { config, sources, warnings };
+}
+
+/**
+ * Resolve the file a scope writes to. `global` honors `PI_NOTICE_CONFIG` the same
+ * way {@link configPaths} does, so a custom path is never silently bypassed.
+ */
+export function configFilePath(
+	cwd: string,
+	scope: ConfigScope,
+	env: NodeJS.ProcessEnv = process.env,
+): string {
+	if (scope === "local") {
+		return join(cwd, ".pi", "pi-notice.json");
+	}
+	const custom = env.PI_NOTICE_CONFIG?.trim();
+	if (custom) {
+		const expanded = expandHome(custom);
+		return isAbsolute(expanded) ? expanded : resolve(cwd, expanded);
+	}
+	return join(homedir(), ".pi", "agent", "pi-notice.json");
+}
+
+/** Read a config file, returning `undefined` when it is missing or malformed. */
+export function readConfigObject(path: string): JsonObject | undefined {
+	return readConfigFile(path, []);
+}
+
+/**
+ * Deep-merge `patch` into the file at `path`, creating parent directories.
+ * Unknown keys written by other tools are preserved.
+ */
+export function writeConfigPatch(path: string, patch: JsonObject): void {
+	const existing = readConfigFile(path, []) ?? {};
+	const merged = mergeConfig(existing, patch) as JsonObject;
+	mkdirSync(dirname(path), { recursive: true });
+	writeFileSync(path, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
 }
 
 /** True when the local wall clock falls inside the configured quiet-hours window. */

@@ -13,6 +13,10 @@ import {
 	truncate,
 } from "../src/format.ts";
 import type { NoticeConfig } from "../src/types.ts";
+import { setLocale } from "../src/i18n.ts";
+
+// Notification texts are asserted in Simplified Chinese.
+setLocale("zh-CN");
 
 function config(overrides: Partial<NoticeConfig> = {}): NoticeConfig {
 	return { ...structuredClone(DEFAULT_CONFIG), ...overrides };
