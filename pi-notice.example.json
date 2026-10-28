@@ -1,0 +1,55 @@
+{
+  "enabled": true,
+  "channels": ["auto"],
+  "events": {
+    "settled": true,
+    "ask": true,
+    "todo": true,
+    "errors": true,
+    "retry": true,
+    "session": true
+  },
+  "sessionReasons": ["resume"],
+  "minDurationMs": 0,
+  "dedupeWindowMs": 1500,
+  "debug": false,
+  "quietHours": {
+    "enabled": false,
+    "start": "23:00",
+    "end": "08:00",
+    "allowUrgent": true
+  },
+  "summary": {
+    "maxBodyChars": 220,
+    "maxReplyChars": 140,
+    "includeProject": true,
+    "includeDuration": true,
+    "includeReply": true,
+    "includeTodo": true
+  },
+  "desktop": {
+    "sound": true,
+    "appId": "Pi",
+    "timeoutSeconds": 8
+  },
+  "termux": {
+    "command": "termux-notification",
+    "notificationId": "pi-notice",
+    "priority": "auto",
+    "sound": true,
+    "vibrate": true,
+    "vibrateMs": 200,
+    "group": "pi-notice",
+    "action": "am start -n com.termux/.app.TermuxActivity"
+  },
+  "ntfy": {
+    "url": "https://ntfy.sh",
+    "topic": "",
+    "token": "",
+    "priority": "auto",
+    "tags": ["robot"]
+  },
+  "osc": {
+    "enabled": false
+  }
+}

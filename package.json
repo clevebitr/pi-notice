@@ -1,0 +1,65 @@
+{
+  "name": "pi-notice",
+  "version": "0.1.0",
+  "description": "Desktop, Termux and push notifications for Pi: turn completion, ask/todo status, errors and reconnects.",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "notifications",
+    "node-notifier",
+    "termux"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./extensions/pi-notice.ts"
+  },
+  "files": [
+    "extensions",
+    "src",
+    "scripts",
+    "README.md",
+    "LICENSE",
+    "pi-notice.example.json",
+    "RELEASING.md"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/pi-notice.ts"
+    ]
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "node --test tests/*.test.ts",
+    "demo": "node --experimental-strip-types scripts/demo.ts",
+    "prepublishOnly": "npm run check && npm test"
+  },
+  "dependencies": {
+    "node-notifier": "^11.0.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.4.0",
+    "@types/node": "^24.10.1",
+    "@types/node-notifier": "^8.0.5",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.22.2"
+  },
+  "author": "clevebitr (https://github.com/clevebitr)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/clevebitr/pi-notice.git"
+  },
+  "homepage": "https://github.com/clevebitr/pi-notice#readme",
+  "bugs": {
+    "url": "https://github.com/clevebitr/pi-notice/issues"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  }
+}
