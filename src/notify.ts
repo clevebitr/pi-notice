@@ -2,7 +2,7 @@ import { createChannels, resolveChannelNames } from "./channels/index.ts";
 import type { Channel } from "./channels/types.ts";
 import type { ChannelResult } from "./channels/types.ts";
 import { isQuietHours } from "./config.ts";
-import type { Notice, NoticeConfig } from "./types.ts";
+import type { Notice, NoticeAction, NoticeConfig } from "./types.ts";
 
 export interface Logger {
 	debug(...args: unknown[]): void;
@@ -22,6 +22,13 @@ export interface DispatcherOptions {
 	channels?: Channel[];
 	enabled?: boolean;
 }
+
+/** Why an interactive notification ended the way it did. */
+export type InteractiveOutcome =
+	| { status: "unsupported" }
+	| { status: "failed"; error?: string }
+	| { status: "dismissed" }
+	| { status: "selected"; actionId: string; channel: string };
 
 export interface SendOptions {
 	/** A stable key that suppresses duplicates inside `dedupeWindowMs`. */
@@ -67,6 +74,45 @@ export class NoticeDispatcher {
 		// `config.enabled` is applied through setEnabled() on reload, so the
 		// runtime toggle in /notice can turn notifications back on for this run.
 		return this.enabled;
+	}
+
+	/** The first channel that can report button presses back to this process. */
+	interactiveChannel(): Channel | undefined {
+		return this.channels.find((channel) => channel.actions);
+	}
+
+	/**
+	 * Show a notification with buttons. Deliberately bypasses the delivery chain:
+	 * an interactive notification can stay on screen for minutes, and must not
+	 * block ordinary notifications queued behind it.
+	 */
+	async sendInteractive(notice: Notice, actions: NoticeAction[]): Promise<InteractiveOutcome> {
+		if (!this.isEnabled()) {
+			return { status: "unsupported" };
+		}
+		if (isQuietHours(this.config)) {
+			const urgent = notice.urgency === "high" && this.config.quietHours.allowUrgent;
+			if (!urgent) {
+				return { status: "unsupported" };
+			}
+		}
+		const channel = this.interactiveChannel();
+		if (!channel?.actions) {
+			return { status: "unsupported" };
+		}
+		if (this.config.debug) {
+			this.logger.debug(`interactive ${notice.kind}: ${actions.map((action) => action.id).join(", ")}`);
+		}
+		try {
+			const actionId = await channel.actions.send(notice, actions);
+			return actionId
+				? { status: "selected", actionId, channel: channel.name }
+				: { status: "dismissed" };
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this.logger.warn(`${channel.name} 交互通知失败: ${message}`);
+			return { status: "failed", error: message };
+		}
 	}
 
 	channelNames(): string[] {

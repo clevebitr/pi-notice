@@ -22,6 +22,12 @@ export type NoticeKind =
 	| "session"
 	| "test";
 
+/** A button rendered by a channel that can report the press back to this process. */
+export interface NoticeAction {
+	id: string;
+	label: string;
+}
+
 export interface Notice {
 	title: string;
 	body: string;
@@ -54,6 +60,8 @@ export interface SummaryConfig {
 
 export interface DesktopConfig {
 	sound: boolean;
+	/** Seconds an action notification stays available for a click. */
+	actionsTimeoutSeconds: number;
 	/** Windows toast app id (SnoreToast `-appID`). */
 	appId: string;
 	/** Seconds the toast stays visible on Windows. */
@@ -97,6 +105,8 @@ export interface NoticeConfig {
 	/** Do not notify for runs shorter than this (errors still notify). */
 	minDurationMs: number;
 	quietHours: QuietHoursConfig;
+	/** Offer `ask` options as notification buttons where the channel can report clicks. */
+	askActions: boolean;
 	summary: SummaryConfig;
 	desktop: DesktopConfig;
 	termux: TermuxConfig;

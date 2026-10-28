@@ -333,10 +333,30 @@ export function buildTodoNotice(
 	};
 }
 
+export interface AskOptionLike {
+	label?: string;
+}
+
 export interface AskQuestionLike {
 	question?: string;
 	header?: string;
-	options?: unknown[];
+	options?: Array<AskOptionLike | undefined>;
+	multiSelect?: boolean;
+}
+
+/** 1-based page window used by the interactive (button) notification. */
+export interface AskPageInfo {
+	page: number;
+	pages: number;
+	from: number;
+	to: number;
+	total: number;
+}
+
+function optionLabels(question: AskQuestionLike | undefined): string[] {
+	return (question?.options ?? [])
+		.map((option) => stringValue(option?.label))
+		.filter((label): label is string => Boolean(label));
 }
 
 export function buildAskNotice(
@@ -362,14 +382,78 @@ export function buildAskNotice(
 			: optionCount > 0
 				? optionsLabel
 				: undefined;
+	// List option labels even when the channel cannot offer buttons: the
+	// notification then still tells you what the choices are.
+	const optionLines =
+		questions.length === 1
+			? optionLabels(first).map((label, index) => `${index + 1}. ${truncate(label, 60)}`)
+			: [];
 	const lines = [
 		header && question ? `${header}: ${question}` : question ?? t("notice.ask.waiting"),
 		meta,
+		questions.length === 1 && first?.multiSelect ? t("notice.ask.multiHint") : undefined,
+		...optionLines,
 	];
 	return {
 		title: titleWithProject(project, t("notice.ask.title"), config.summary.includeProject),
 		body: trimBody(lines, config.summary.maxBodyChars) || t("notice.ask.waiting"),
 		urgency: "high",
+		kind: "ask",
+		tag: "ask",
+	};
+}
+
+export function buildAskPageNotice(
+	project: string,
+	question: AskQuestionLike,
+	config: NoticeConfig,
+	t: Translator,
+	page: AskPageInfo,
+): Notice {
+	const text = stringValue(question.question);
+	const header = stringValue(question.header);
+	const labels = optionLabels(question);
+	const lines = [
+		header && text ? `${header}: ${text}` : text ?? t("notice.ask.waiting"),
+		t("notice.ask.page", {
+			page: page.page,
+			pages: page.pages,
+			from: page.from,
+			to: page.to,
+			total: page.total,
+		}),
+		...labels
+			.slice(page.from - 1, page.to)
+			.map((label, index) => `${page.from + index}. ${truncate(label, 60)}`),
+		t("notice.ask.actionsHint"),
+	];
+	return {
+		title: titleWithProject(project, t("notice.ask.title"), config.summary.includeProject),
+		body: trimBody(lines, config.summary.maxBodyChars) || t("notice.ask.waiting"),
+		urgency: "high",
+		kind: "ask",
+		tag: "ask",
+	};
+}
+
+/** A button press that the ask extension refused; the dialog is still open. */
+export function buildAnswerFailedNotice(
+	project: string,
+	code: string,
+	config: NoticeConfig,
+	t: Translator,
+): Notice {
+	const key = `notice.ask.reason.${code}`;
+	const translated = t(key);
+	const reason = translated === key ? t("notice.ask.reason.invalid_answer") : translated;
+	return {
+		title: titleWithProject(
+			project,
+			t("notice.ask.result.failedTitle"),
+			config.summary.includeProject,
+		),
+		body: trimBody([reason], config.summary.maxBodyChars),
+		urgency: "low",
 		kind: "ask",
 		tag: "ask",
 	};

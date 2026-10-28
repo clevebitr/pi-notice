@@ -30,6 +30,7 @@ export const DEFAULT_CONFIG: NoticeConfig = {
 		session: true,
 	},
 	sessionReasons: ["resume"],
+	askActions: true,
 	minDurationMs: 0,
 	quietHours: {
 		enabled: false,
@@ -49,6 +50,7 @@ export const DEFAULT_CONFIG: NoticeConfig = {
 		sound: true,
 		appId: "Pi",
 		timeoutSeconds: 8,
+		actionsTimeoutSeconds: 300,
 	},
 	termux: {
 		command: "termux-notification",
@@ -149,6 +151,7 @@ function normalizeConfig(input: unknown): NoticeConfig {
 			)
 		: ["resume"];
 
+	config.askActions = asBoolean(config.askActions, true);
 	config.minDurationMs = clampNumber(config.minDurationMs, 0, 0, 24 * 60 * 60 * 1000);
 	config.dedupeWindowMs = clampNumber(config.dedupeWindowMs, 1500, 0, 60_000);
 
@@ -175,6 +178,7 @@ function normalizeConfig(input: unknown): NoticeConfig {
 		sound: asBoolean(desktop.sound, true),
 		appId: asString(desktop.appId, "Pi"),
 		timeoutSeconds: clampNumber(desktop.timeoutSeconds, 8, 1, 60),
+		actionsTimeoutSeconds: clampNumber(desktop.actionsTimeoutSeconds, 300, 10, 3600),
 	};
 
 	const termux: JsonObject = isPlainObject(config.termux) ? config.termux : {};
@@ -280,6 +284,9 @@ function parseEventEnv(value: string, events: Record<EventKey, boolean>): void {
 function applyEnv(config: NoticeConfig, env: NodeJS.ProcessEnv): NoticeConfig {
 	if (["1", "true", "yes", "on"].includes((env.PI_NOTICE_DISABLED ?? "").toLowerCase())) {
 		config.enabled = false;
+	}
+	if (["0", "false", "no", "off"].includes((env.PI_NOTICE_ASK_ACTIONS ?? "").toLowerCase())) {
+		config.askActions = false;
 	}
 	if (env.PI_NOTICE_LOCALE?.trim()) {
 		config.locale = env.PI_NOTICE_LOCALE.trim();

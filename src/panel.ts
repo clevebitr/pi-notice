@@ -17,6 +17,7 @@ export interface PanelItem {
 /** A change produced by flipping one panel row. */
 export interface PanelPatch {
 	enabled?: boolean;
+	askActions?: boolean;
 	events?: Partial<Record<EventKey, boolean>>;
 	channels?: ChannelChoice[];
 	locale?: string;
@@ -63,6 +64,14 @@ export function buildPanelItems(config: NoticeConfig, t: Translator = defaultTra
 			values: onOff,
 		});
 	}
+
+	items.push({
+		id: "askActions",
+		label: t("panel.row.askActions"),
+		description: t("panel.desc.askActions"),
+		currentValue: labelFor(config.askActions, t),
+		values: onOff,
+	});
 
 	for (const channel of ["auto", ...CHANNEL_NAMES] as const) {
 		const enabled = config.channels.includes(channel);
@@ -124,6 +133,11 @@ export function applyPanelItem(
 	if (id === "enabled") {
 		const enabled = parseToggle(value, t);
 		return enabled === undefined ? undefined : { enabled };
+	}
+
+	if (id === "askActions") {
+		const enabled = parseToggle(value, t);
+		return enabled === undefined ? undefined : { askActions: enabled };
 	}
 
 	if (id.startsWith("event:")) {

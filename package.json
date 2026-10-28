@@ -1,6 +1,6 @@
 {
   "name": "pi-notice",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Desktop, Termux and push notifications for Pi: turn completion, ask/todo status, errors and reconnects.",
   "keywords": [
     "pi-package",

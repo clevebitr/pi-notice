@@ -125,7 +125,28 @@ pi-notice 通知设置
 | `retry` | 自动重试与恢复 | `/notice off retry` |
 | `session` | 会话重连 | `/notice off session` |
 
+`askActions`（默认 `true`）控制是否把 ask 选项做成通知按钮，不属于事件开关。
+
 整体开关：`{"enabled": false}` 或 `/notice off`。
+
+## 从通知直接作答（Windows / macOS / Linux）
+
+当模型通过 `ask_user_question` 问你单选时，通知里会带上选项按钮，点一下就等于在终端里选了：
+
+| 平台 | 按钮数 | 回传方式 |
+| --- | --- | --- |
+| Windows | 3 | SnoreToast 按钮，点击经命名管道回传给 pi 进程 |
+| macOS | 3 | terminal-notifier `actions` |
+| Linux | 5 | `notify-send -A`（需 libnotify ≥ 0.7.9） |
+| Termux / ntfy / OSC | 不支持 | 只发带编号选项的普通通知 |
+
+- 一条通知 = 一道题；选项超过按钮数时自动分页，最后一个按钮是「更多 →」，正文写「第 1/2 页」。
+- 正文永远列出选项编号和文字，所以即使平台没有按钮也能看懂选项。
+- 多选题目（multiSelect）和「一次问多个问题」不做按钮，通知会提示回终端作答——按钮无法表达这些语义。
+- 点完按钮会走 ask 扩展的 `rpiv:ask-user:answer` 事件；如果答案被拒绝（比如你已经在终端回答过），会再发一条「作答未生效」的提示。
+- 关闭按钮：`{"askActions": false}`、`PI_NOTICE_ASK_ACTIONS=0`，或面板里的「作答 · 从通知直接选择」。
+- **Windows 首次会创建开始菜单快捷方式** `%APPDATA%\Microsoft\Windows\Start Menu\Programs\<desktop.appId>.lnk`（默认 `Pi.lnk`）。Windows 只把带注册 AppID 的通知按钮点击回传给应用；不需要时可删除该快捷方式并把 `askActions` 关掉。
+- 通知横幅会按时消失（SnoreToast 0.7 固定约 7 秒）。横幅内的点击已实测通过；通知中心里的延迟点击走同一管道，但尚未端到端验证，建议在横幅出现时直接点。
 
 ## 多语言
 

@@ -15,6 +15,7 @@
   "sessionReasons": [
     "resume"
   ],
+  "askActions": true,
   "minDurationMs": 0,
   "dedupeWindowMs": 1500,
   "debug": false,
@@ -35,7 +36,8 @@
   "desktop": {
     "sound": true,
     "appId": "Pi",
-    "timeoutSeconds": 8
+    "timeoutSeconds": 8,
+    "actionsTimeoutSeconds": 300
   },
   "termux": {
     "command": "termux-notification",

@@ -100,3 +100,98 @@ test("failed channels are logged, not thrown", async () => {
 	assert.equal(results[0]?.error, "boom");
 	assert.ok(warnings.some((line) => line.includes("desktop 发送失败")));
 });
+
+function interactiveChannel(outcome: "selected" | "dismissed" | "throws"): Channel & {
+	sent: Notice[];
+	seen: string[][];
+} {
+	const sent: Notice[] = [];
+	const seen: string[][] = [];
+	return {
+		name: "desktop",
+		sent,
+		seen,
+		async send(value) {
+			sent.push(value);
+		},
+		actions: {
+			maxActions: 3,
+			async send(value, actions) {
+				sent.push(value);
+				seen.push(actions.map((action) => action.id));
+				if (outcome === "throws") {
+					throw new Error("no display");
+				}
+				return outcome === "selected" ? "ask-opt:1" : undefined;
+			},
+		},
+	};
+}
+
+const actions = [
+	{ id: "ask-opt:0", label: "1. A" },
+	{ id: "ask-opt:1", label: "2. B" },
+];
+
+test("interactive sends are unsupported without an action-capable channel", async () => {
+	const dispatcher = new NoticeDispatcher({
+		config: config(),
+		channels: [fakeChannel()],
+		logger: { debug: () => {}, warn: () => {} },
+	});
+	assert.equal(dispatcher.interactiveChannel(), undefined);
+	assert.deepEqual(await dispatcher.sendInteractive(notice("ask", "high"), actions), {
+		status: "unsupported",
+	});
+});
+
+test("interactive sends report selected, dismissed and failed outcomes", async () => {
+	const selected = new NoticeDispatcher({
+		config: config(),
+		channels: [interactiveChannel("selected")],
+		logger: { debug: () => {}, warn: () => {} },
+	});
+	const chosen = await selected.sendInteractive(notice("ask", "high"), actions);
+	assert.deepEqual(chosen, { status: "selected", actionId: "ask-opt:1", channel: "desktop" });
+
+	const dismissed = new NoticeDispatcher({
+		config: config(),
+		channels: [interactiveChannel("dismissed")],
+		logger: { debug: () => {}, warn: () => {} },
+	});
+	assert.deepEqual(await dismissed.sendInteractive(notice("ask", "high"), actions), {
+		status: "dismissed",
+	});
+
+	const failed = new NoticeDispatcher({
+		config: config(),
+		channels: [interactiveChannel("throws")],
+		logger: { debug: () => {}, warn: () => {} },
+	});
+	const outcome = await failed.sendInteractive(notice("ask", "high"), actions);
+	assert.equal(outcome.status, "failed");
+});
+
+test("interactive sends respect the master switch and quiet hours", async () => {
+	const channel = interactiveChannel("selected");
+	const dispatcher = new NoticeDispatcher({
+		config: config({ enabled: false }),
+		channels: [channel],
+		logger: { debug: () => {}, warn: () => {} },
+	});
+	assert.deepEqual(await dispatcher.sendInteractive(notice("ask", "high"), actions), {
+		status: "unsupported",
+	});
+	assert.equal(channel.seen.length, 0);
+
+	const quiet = new NoticeDispatcher({
+		config: config({
+			quietHours: { ...DEFAULT_CONFIG.quietHours, enabled: true, start: "00:00", end: "23:59", allowUrgent: false },
+		}),
+		channels: [interactiveChannel("selected")],
+		logger: { debug: () => {}, warn: () => {} },
+	});
+	assert.deepEqual(await quiet.sendInteractive(notice("ask", "high"), actions), {
+		status: "unsupported",
+	});
+});

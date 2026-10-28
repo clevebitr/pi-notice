@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 
 import { DEFAULT_CONFIG } from "../src/config.ts";
 import {
+	buildAnswerFailedNotice,
 	buildAskNotice,
+	buildAskPageNotice,
 	buildSettledNotice,
 	buildTodoNotice,
 	formatDuration,
@@ -13,7 +15,7 @@ import {
 	truncate,
 } from "../src/format.ts";
 import type { NoticeConfig } from "../src/types.ts";
-import { setLocale } from "../src/i18n.ts";
+import { createTranslator, setLocale } from "../src/i18n.ts";
 
 // Notification texts are asserted in Simplified Chinese.
 setLocale("zh-CN");
@@ -136,4 +138,46 @@ test("summary body respects maxBodyChars", () => {
 		config({ summary: { ...DEFAULT_CONFIG.summary, maxBodyChars: 80 } }),
 	);
 	assert.ok(notice.body.length <= 80);
+});
+
+test("ask notice numbers the options for single questions", () => {
+	const notice = buildAskNotice(
+		"demo",
+		[
+			{
+				question: "选哪个?",
+				header: "方案",
+				options: [{ label: "甲方案" }, { label: "乙方案" }, { label: "丙方案" }],
+			},
+		],
+		config(),
+	);
+	assert.match(notice.body, /1\. 甲方案/);
+	assert.match(notice.body, /3\. 丙方案/);
+});
+
+test("ask page notice shows the window and its options", () => {
+	const notice = buildAskPageNotice(
+		"demo",
+		{
+			question: "选哪个?",
+			header: "方案",
+			options: [{ label: "A" }, { label: "B" }, { label: "C" }, { label: "D" }, { label: "E" }],
+		},
+		config(),
+		createTranslator("zh-CN"),
+		{ page: 2, pages: 2, from: 3, to: 5, total: 5 },
+	);
+	assert.match(notice.body, /第 2\/2 页/);
+	assert.match(notice.body, /3\. C/);
+	assert.equal(notice.urgency, "high");
+	assert.doesNotMatch(notice.body, /1\. A/);
+});
+
+test("answer failures explain the refusal code", () => {
+	const failed = buildAnswerFailedNotice("demo", "not_found", config(), createTranslator("zh-CN"));
+	assert.match(failed.title, /作答未生效/);
+	assert.match(failed.body, /已回答或已关闭/);
+	const unknown = buildAnswerFailedNotice("demo", "weird", config(), createTranslator("zh-CN"));
+	assert.match(unknown.body, /选项未被接受/);
 });

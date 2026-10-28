@@ -22,11 +22,13 @@ function createPi(): {
 	api: ExtensionAPI;
 	emit: (name: string, event?: unknown, ctx?: unknown) => Promise<void>;
 	emitBus: (name: string, data: unknown) => void;
+	emitted: Array<{ name: string; data: unknown }>;
 	commands: Map<string, { handler: (args: string, ctx: any) => Promise<void> }>;
 } {
 	const handlers = new Map<string, Handler[]>();
 	const bus = new Map<string, Array<(data: unknown) => void>>();
 	const commands = new Map<string, { handler: (args: string, ctx: any) => Promise<void> }>();
+	const emitted: Array<{ name: string; data: unknown }> = [];
 	const api = {
 		on(name: string, handler: Handler) {
 			handlers.set(name, [...(handlers.get(name) ?? []), handler]);
@@ -38,6 +40,7 @@ function createPi(): {
 				return () => {};
 			},
 			emit(name: string, data: unknown) {
+				emitted.push({ name, data });
 				for (const handler of bus.get(name) ?? []) {
 					handler(data);
 				}
@@ -63,6 +66,7 @@ function createPi(): {
 			}
 		},
 		commands,
+		emitted,
 	};
 }
 
@@ -85,6 +89,7 @@ async function withRuntime(
 		statuses: Array<string | undefined>;
 		env: NodeJS.ProcessEnv;
 	}) => Promise<void>,
+	extraChannels: Channel[] = [],
 ): Promise<void> {
 	const dir = mkdtempSync(join(tmpdir(), "pi-notice-ext-"));
 	mkdirSync(join(dir, ".pi"), { recursive: true });
@@ -100,7 +105,7 @@ async function withRuntime(
 	const channel = fakeChannel();
 	const dispatcher = new NoticeDispatcher({
 		config,
-		channels: [channel],
+		channels: [channel, ...extraChannels],
 		logger: { debug: () => {}, warn: () => {} },
 	});
 	const pi = createPi();
@@ -432,5 +437,150 @@ test("/notice opens the panel only when a TUI is available", async () => {
 		};
 		await runNotice(pi, "", headless);
 		assert.match(messages.at(-1) ?? "", /TUI/);
+	});
+});
+
+/** A channel that can show buttons and resolves with queued action ids. */
+function fakeInteractiveChannel(maxActions = 3): Channel & {
+	sent: Array<{ notice: Notice; actions: { id: string; label: string }[] }>;
+	queue: Array<string | undefined>;
+} {
+	const sent: Array<{ notice: Notice; actions: { id: string; label: string }[] }> = [];
+	const queue: Array<string | undefined> = [];
+	return {
+		name: "desktop",
+		sent,
+		queue,
+		async send(): Promise<void> {},
+		actions: {
+			maxActions,
+			async send(notice, actions) {
+				sent.push({ notice, actions });
+				return queue.shift();
+			},
+		},
+	};
+}
+
+function askPayload(options: string[], multiSelect = false) {
+	return {
+		questions: [
+			{
+				header: "方案",
+				question: "选哪个?",
+				multiSelect,
+				options: options.map((label) => ({ label })),
+			},
+		],
+	};
+}
+
+test("ask options become buttons and a tap answers the questionnaire", async () => {
+	const interactive = fakeInteractiveChannel();
+	await withRuntime(
+		{},
+		async ({ pi, channel, ctx }) => {
+			await pi.emit("session_start", startup, ctx);
+			interactive.queue.push("ask-opt:1");
+
+			pi.emitBus("rpiv:ask-user:prompt", { toolCallId: "ask-1", ...askPayload(["甲", "乙", "丙"]) });
+			await tick();
+
+			assert.equal(channel.sent.filter((item) => item.kind === "ask").length, 0, "no plain duplicate");
+			assert.equal(interactive.sent.length, 1);
+			assert.deepEqual(
+				interactive.sent[0]?.actions.map((action) => action.id),
+				["ask-opt:0", "ask-opt:1", "ask-opt:2"],
+			);
+			assert.match(interactive.sent[0]?.notice.body ?? "", /1\. 甲/);
+
+			const answer = pi.emitted.find((event) => event.name === "rpiv:ask-user:answer");
+			assert.ok(answer, "answered through the rpiv channel");
+			const payload = answer!.data as { toolCallId: string; answers: Array<{ optionIndexes: number[] }> };
+			assert.equal(payload.toolCallId, "ask-1");
+			assert.deepEqual(payload.answers[0]?.optionIndexes, [1]);
+		},
+		[interactive],
+	);
+});
+
+test("more options are paged and the next page answers", async () => {
+	const interactive = fakeInteractiveChannel(3);
+	await withRuntime(
+		{},
+		async ({ pi, ctx }) => {
+			await pi.emit("session_start", startup, ctx);
+			interactive.queue.push("ask-more:2", "ask-opt:3");
+
+			pi.emitBus("rpiv:ask-user:prompt", {
+				toolCallId: "ask-2",
+				...askPayload(["A", "B", "C", "D", "E"]),
+			});
+			await tick();
+			await tick();
+
+			assert.equal(interactive.sent.length, 2);
+			assert.deepEqual(
+				interactive.sent[0]?.actions.map((action) => action.id),
+				["ask-opt:0", "ask-opt:1", "ask-more:2"],
+			);
+			assert.match(interactive.sent[0]?.notice.body ?? "", /第 1\/2 页/);
+			assert.deepEqual(
+				interactive.sent[1]?.actions.map((action) => action.id),
+				["ask-opt:2", "ask-opt:3", "ask-opt:4"],
+			);
+			assert.match(interactive.sent[1]?.notice.body ?? "", /3\. C/);
+
+			const answer = pi.emitted.find((event) => event.name === "rpiv:ask-user:answer");
+			const payload = answer?.data as { answers: Array<{ optionIndexes: number[] }> };
+			assert.deepEqual(payload?.answers[0]?.optionIndexes, [3]);
+		},
+		[interactive],
+	);
+});
+
+test("multi-select and multi-question asks stay plain", async () => {
+	const interactive = fakeInteractiveChannel();
+	await withRuntime(
+		{},
+		async ({ pi, channel, ctx }) => {
+			await pi.emit("session_start", startup, ctx);
+			pi.emitBus("rpiv:ask-user:prompt", { toolCallId: "ask-3", ...askPayload(["甲", "乙"], true) });
+			pi.emitBus("rpiv:ask-user:prompt", {
+				toolCallId: "ask-4",
+				questions: [
+					{ header: "A", question: "问题一", options: [{ label: "甲" }] },
+					{ header: "B", question: "问题二", options: [{ label: "乙" }] },
+				],
+			});
+			await tick();
+			assert.equal(interactive.sent.length, 0);
+			assert.equal(channel.sent.filter((item) => item.kind === "ask").length, 2);
+			assert.match(channel.sent[0]?.body ?? "", /1\. 甲/);
+		},
+		[interactive],
+	);
+});
+
+test("refused answers produce one follow-up notice", async () => {
+	await withRuntime({}, async ({ pi, channel, ctx }) => {
+		await pi.emit("session_start", startup, ctx);
+		pi.emitBus("rpiv:ask-user:prompt", {
+			toolCallId: "ask-5",
+			questions: [{ header: "方案", question: "选哪个?", options: [{ label: "甲" }] }],
+		});
+		await tick();
+
+		pi.emitBus("rpiv:ask-user:answer-result", {
+			ok: false,
+			code: "not_found",
+			requestId: "unknown-request",
+		});
+		await tick();
+		assert.equal(
+			channel.sent.filter((item) => item.title.includes("作答未生效")).length,
+			0,
+			"ignores verdicts it did not ask for",
+		);
 	});
 });

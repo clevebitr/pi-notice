@@ -5,7 +5,9 @@ import { Container, SettingsList, type SettingItem } from "@earendil-works/pi-tu
 import { helpText, parseCommand, type CommandScope } from "../src/commands.ts";
 import { EVENT_KEYS, configFilePath, loadConfig, writeConfigPatch } from "../src/config.ts";
 import {
+	buildAnswerFailedNotice,
 	buildAskNotice,
+	buildAskPageNotice,
 	buildErrorNotice,
 	buildRecoveredNotice,
 	buildRetryNotice,
@@ -16,13 +18,14 @@ import {
 	buildUiPromptNotice,
 	parseTodoSnapshot,
 	projectLabel,
+	truncate,
 	type AskQuestionLike,
 	type TodoSnapshot,
 } from "../src/format.ts";
 import { LOCALES, getLocale, localeLabel, setLocale, translate as t } from "../src/i18n.ts";
 import { NoticeDispatcher } from "../src/notify.ts";
 import { applyPanelItem, buildPanelItems } from "../src/panel.ts";
-import type { EventKey, Notice, NoticeConfig, SessionReason } from "../src/types.ts";
+import type { EventKey, Notice, NoticeAction, NoticeConfig, SessionReason } from "../src/types.ts";
 
 interface RuntimeState {
 	config?: NoticeConfig;
@@ -41,6 +44,10 @@ interface RuntimeState {
 	pendingTodo?: TodoSnapshot;
 	todoTimer?: NodeJS.Timeout;
 	askSuppressUntil: number;
+	/** Questionnaires already notified, so the rpiv event and the tool event do not double-fire. */
+	askedToolCalls: Set<string>;
+	/** requestIds waiting for a `rpiv:ask-user:answer-result` verdict. */
+	answerRequests: Set<string>;
 }
 
 type AssistantMessageLike = {
@@ -85,7 +92,12 @@ function asAskQuestions(value: unknown): AskQuestionLike[] {
 	return value.filter(isObject).map((question) => ({
 		question: typeof question.question === "string" ? question.question : undefined,
 		header: typeof question.header === "string" ? question.header : undefined,
-		options: Array.isArray(question.options) ? question.options : [],
+		multiSelect: question.multiSelect === true,
+		options: Array.isArray(question.options)
+			? question.options.filter(isObject).map((option) => ({
+					label: typeof option.label === "string" ? option.label : undefined,
+				}))
+			: [],
 	}));
 }
 
@@ -128,6 +140,8 @@ export default function piNotice(pi: ExtensionAPI, deps: NoticeDeps = {}): void 
 		pendingRetry: false,
 		retryCount: 0,
 		askSuppressUntil: 0,
+		askedToolCalls: new Set(),
+		answerRequests: new Set(),
 	};
 
 	const reload = (cwd: string): void => {
@@ -251,6 +265,8 @@ export default function piNotice(pi: ExtensionAPI, deps: NoticeDeps = {}): void 
 		state.pendingRetry = false;
 		state.retryCount = 0;
 		state.askSuppressUntil = 0;
+		state.askedToolCalls.clear();
+		state.answerRequests.clear();
 		state.todo = undefined;
 
 		const current = config();
@@ -427,22 +443,141 @@ export default function piNotice(pi: ExtensionAPI, deps: NoticeDeps = {}): void 
 	// @juicesharp/rpiv-ask-user-question publishes these events specifically for
 	// notification integrations. `blocked` closes the suppression window so a
 	// later generic UI prompt is not swallowed.
-	pi.events.on("rpiv:ask-user:prompt", (data) => {
+	const askOptionLabels = (question: AskQuestionLike): string[] =>
+		(question.options ?? [])
+			.map((option) => (typeof option?.label === "string" ? option.label.trim() : ""))
+			.filter(Boolean);
+
+	/**
+	 * One notification per question. A question with more options than the
+	 * channel can show gets a paged button set; the last button moves to the next
+	 * page. Only single, single-select questionnaires can be answered this way.
+	 */
+	const showAskPage = async (
+		toolCallId: string,
+		question: AskQuestionLike,
+		start: number,
+		plainKey: string,
+	): Promise<void> => {
 		const current = config();
-		if (!current?.events.ask) {
+		const dispatcher = state.dispatcher;
+		if (!current || !dispatcher) {
 			return;
 		}
-		const payload = isObject(data) ? data : {};
-		const questions = asAskQuestions(payload.questions);
+		const channel = dispatcher.interactiveChannel();
+		const labels = askOptionLabels(question);
+		if (!channel?.actions || labels.length === 0) {
+			send(buildAskNotice(project(), [question], current), plainKey);
+			return;
+		}
+
+		const max = Math.max(1, channel.actions.maxActions);
+		// Walk the page boundaries so the last page may use every button available.
+		const starts: number[] = [];
+		for (let offset = 0; offset < labels.length; ) {
+			starts.push(offset);
+			offset += Math.max(1, labels.length - offset <= max ? labels.length - offset : max - 1);
+		}
+		const pageStart = starts.includes(start) ? start : 0;
+		const pageIndex = starts.indexOf(pageStart);
+		const pageEnd = Math.min(
+			labels.length,
+			pageStart + Math.max(1, labels.length - pageStart <= max ? labels.length - pageStart : max - 1),
+		);
+
+		const notice = buildAskPageNotice(
+			project(),
+			question,
+			current,
+			t,
+			{ page: pageIndex + 1, pages: starts.length, from: pageStart + 1, to: pageEnd, total: labels.length },
+		);
+		const actions: NoticeAction[] = labels.slice(pageStart, pageEnd).map((label, offset) => ({
+			id: `ask-opt:${pageStart + offset}`,
+			label: `${pageStart + offset + 1}. ${truncate(label, 18)}`,
+		}));
+		if (pageEnd < labels.length) {
+			actions.push({ id: `ask-more:${pageEnd}`, label: t("notice.ask.more") });
+		}
+
+		const outcome = await dispatcher.sendInteractive(notice, actions);
+		if (outcome.status === "unsupported" || outcome.status === "failed") {
+			send(buildAskNotice(project(), [question], current), plainKey);
+			return;
+		}
+		if (outcome.status !== "selected") {
+			return;
+		}
+
+		const [kind, raw] = outcome.actionId.split(":");
+		const value = Number(raw);
+		if (kind === "ask-more" && Number.isFinite(value)) {
+			void showAskPage(toolCallId, question, value, plainKey);
+			return;
+		}
+		if (kind !== "ask-opt" || !Number.isFinite(value)) {
+			return;
+		}
+
+		const requestId = `notice:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`;
+		state.answerRequests.add(requestId);
+		if (state.answerRequests.size > 50) {
+			state.answerRequests.clear();
+		}
+		pi.events.emit("rpiv:ask-user:answer", {
+			toolCallId,
+			requestId,
+			answers: [{ questionIndex: 0, optionIndexes: [value] }],
+		});
+	};
+
+	const notifyAsk = (toolCallId: string | undefined, questions: AskQuestionLike[]): void => {
+		const current = config();
+		if (!current?.events.ask || questions.length === 0) {
+			return;
+		}
+		if (toolCallId) {
+			if (state.askedToolCalls.has(toolCallId)) {
+				return;
+			}
+			if (state.askedToolCalls.size > 50) {
+				state.askedToolCalls.clear();
+			}
+			state.askedToolCalls.add(toolCallId);
+		}
 		state.askSuppressUntil = Date.now() + 5 * 60_000;
-		send(
-			buildAskNotice(project(), questions, current),
-			`ask:${typeof payload.toolCallId === "string" ? payload.toolCallId : questions[0]?.question ?? "unknown"}`,
+
+		const plainKey = `ask:${toolCallId ?? questions[0]?.question ?? "unknown"}`;
+		const question = questions[0];
+		const canAnswer =
+			Boolean(toolCallId) &&
+			questions.length === 1 &&
+			question !== undefined &&
+			!question.multiSelect &&
+			current.askActions &&
+			askOptionLabels(question).length > 0 &&
+			Boolean(state.dispatcher?.interactiveChannel()?.actions);
+
+		if (!canAnswer) {
+			send(buildAskNotice(project(), questions, current), plainKey);
+			return;
+		}
+		void showAskPage(toolCallId!, question!, 0, plainKey);
+	};
+
+	pi.events.on("rpiv:ask-user:prompt", (data) => {
+		const payload = isObject(data) ? data : {};
+		notifyAsk(
+			typeof payload.toolCallId === "string" ? payload.toolCallId : undefined,
+			asAskQuestions(payload.questions),
 		);
 	});
 
 	pi.events.on("rpiv:ask-user:blocked", (data) => {
 		const payload = isObject(data) ? data : {};
+		if (typeof payload.toolCallId === "string") {
+			state.askedToolCalls.delete(payload.toolCallId);
+		}
 		if (payload.active === false) {
 			state.askSuppressUntil = 0;
 		} else {
@@ -450,10 +585,27 @@ export default function piNotice(pi: ExtensionAPI, deps: NoticeDeps = {}): void 
 		}
 	});
 
+	// A button answer is validated by the ask extension; report refusals once.
+	pi.events.on("rpiv:ask-user:answer-result", (data) => {
+		const payload = isObject(data) ? data : {};
+		const requestId = typeof payload.requestId === "string" ? payload.requestId : "";
+		if (!requestId || !state.answerRequests.delete(requestId)) {
+			return;
+		}
+		if (payload.ok === true) {
+			return;
+		}
+		const current = config();
+		if (!current?.events.ask) {
+			return;
+		}
+		const code = typeof payload.code === "string" ? payload.code : "invalid_answer";
+		send(buildAnswerFailedNotice(project(), code, current, t), `ask-failed:${requestId}`);
+	});
 
 	// Cover ask-style tools from other extensions even when they do not publish
-	// rpiv events. The rpiv prompt event uses the same toolCallId key, so the
-	// duplicate is dropped by the dispatcher's dedupe window.
+	// rpiv events. `notifyAsk` dedupes on the tool-call id, so the rpiv prompt and
+	// this handler produce one notification per questionnaire.
 	pi.on("tool_execution_start", (event) => {
 		const current = config();
 		if (!current?.events.ask) {
@@ -471,14 +623,13 @@ export default function piNotice(pi: ExtensionAPI, deps: NoticeDeps = {}): void 
 			questions.push({
 				question: args.question,
 				header: typeof args.header === "string" ? args.header : undefined,
-				options: Array.isArray(args.options) ? args.options : [],
+				options: Array.isArray(args.options) ? asAskQuestions([args])[0]?.options ?? [] : [],
 			});
 		}
 		if (questions.length === 0) {
 			return;
 		}
-		state.askSuppressUntil = Date.now() + 5 * 60_000;
-		send(buildAskNotice(project(), questions, current), `ask:${event.toolCallId}`);
+		notifyAsk(event.toolCallId, questions);
 	});
 
 	pi.on("ui_prompt_start", (event) => {

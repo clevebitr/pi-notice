@@ -112,3 +112,63 @@ test("ntfy publishes JSON with title, body, priority and bearer token", async ()
 		);
 	}
 });
+
+test("desktop action options carry labels and wait for a click", async () => {
+	const { buildActionOptions, buildNotifySendActionArgs } = await import("../src/channels/desktop.ts");
+	const actions = [
+		{ id: "ask-opt:0", label: "1. 甲" },
+		{ id: "ask-opt:1", label: "2. 乙" },
+	];
+	const options = buildActionOptions(config(), ask, actions);
+	assert.deepEqual(options.actions, ["1. 甲", "2. 乙"]);
+	assert.equal(options.wait, true);
+	assert.equal(options.timeout, DEFAULT_CONFIG.desktop.actionsTimeoutSeconds);
+
+	const args = buildNotifySendActionArgs(config(), ask, actions);
+	assert.ok(args.includes("--wait"));
+	assert.equal(args[args.indexOf("--urgency") + 1], "critical");
+	assert.equal(args[args.indexOf("-t") + 1], String(DEFAULT_CONFIG.desktop.actionsTimeoutSeconds * 1000));
+	assert.deepEqual(
+		args.filter((arg, index) => index > 0 && args[index - 1] === "-A"),
+		["ask-opt:0=1. 甲", "ask-opt:1=2. 乙"],
+	);
+	assert.deepEqual(args.slice(-2), [ask.title, ask.body]);
+});
+
+test("snoretoast args carry buttons, pipe and appID", async () => {
+	const { buildSnoreToastArgs } = await import("../src/channels/desktop.ts");
+	const args = buildSnoreToastArgs(
+		config({ desktop: { ...DEFAULT_CONFIG.desktop, sound: false } }),
+		ask,
+		[
+			{ id: "ask-opt:0", label: "1. 甲; 乙" },
+			{ id: "ask-more:2", label: "更多 →" },
+		],
+		"\\.\pipe\pi-notice-test",
+	);
+	assert.equal(args[args.indexOf("-appID") + 1], "Pi");
+	assert.equal(args[args.indexOf("-t") + 1], ask.title);
+	assert.equal(args[args.indexOf("-m") + 1], ask.body);
+	// Labels are joined by ";" so a label must not contain one.
+	assert.equal(args[args.indexOf("-b") + 1], "1. 甲 乙;更多 →");
+	assert.equal(args[args.indexOf("-pipeName") + 1], "\\.\pipe\pi-notice-test");
+	assert.ok(args.includes("-silent"));
+});
+
+test("snoretoast pipe payload parses into a result map", async () => {
+	const { parseSnoreToastResult } = await import("../src/channels/desktop.ts");
+	const parsed = parseSnoreToastResult(
+		"action=buttonClicked;notificationId=11448;pipe=\\\\.\\pipe\\x;button=1. 甲方案;version=0.7.0;",
+	);
+	assert.equal(parsed.action, "buttonClicked");
+	assert.equal(parsed.button, "1. 甲方案");
+	assert.equal(parsed.version, "0.7.0");
+	assert.deepEqual(parseSnoreToastResult(""), {});
+	assert.deepEqual(parseSnoreToastResult("action=timedout;"), { action: "timedout" });
+});
+
+test("windows shortcut path lives in the start menu", async () => {
+	const { windowsShortcutPath } = await import("../src/channels/desktop.ts");
+	const path = windowsShortcutPath("Pi");
+	assert.match(path, /Start Menu[\\/]Programs[\\/]Pi\.lnk$/);
+});
