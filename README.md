@@ -46,7 +46,6 @@ pi -e /path/to/pi-notice/extensions/pi-notice.ts
 
 1. `~/.pi/agent/pi-notice.json`
 2. `<项目>/.pi/pi-notice.json`
-3. 环境变量
 
 最小配置：
 
