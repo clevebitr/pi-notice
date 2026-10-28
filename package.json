@@ -20,8 +20,7 @@
     "scripts",
     "README.md",
     "LICENSE",
-    "pi-notice.example.json",
-    "RELEASING.md"
+    "pi-notice.example.json"
   ],
   "pi": {
     "extensions": [
