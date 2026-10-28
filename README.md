@@ -194,7 +194,7 @@ npm run demo      # 走真实通道发一条测试通知
 pi -e ./extensions/pi-notice.ts -p "Reply with exactly: OK"
 ```
 
-发布流程见 [`RELEASING.md`](./RELEASING.md)。
+发布使用 npm **Trusted Publisher（OIDC）**：推送 `v*` tag 后由 GitHub Actions 自动运行 `npm publish`，不需要 `NPM_TOKEN`。首次发布需要先手动 bootstrap 一次，详见 [`RELEASING.md`](./RELEASING.md)。
 
 要求 Node.js >= 22.22.2（`node-notifier@11` 的要求）。
 

@@ -1,27 +1,52 @@
 name: Publish
 
+# Trusted publishing (OIDC): no NPM_TOKEN is used.
+# npm exchanges the GitHub Actions OIDC token for a short-lived publish token.
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
 jobs:
   npm:
+    if: github.repository == 'clevebitr/pi-notice'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
         with:
-          node-version: 24
-          registry-url: https://registry.npmjs.org
-          cache: npm
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          # Trusted publishing docs recommend disabling the package-manager cache.
+          package-manager-cache: false
+
+      - name: Verify tag matches package.json
+        if: github.event_name == 'push'
+        run: |
+          version=$(node -p "require('./package.json').version")
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$version" != "$tag" ]; then
+            echo "::error::Tag v$tag does not match package.json version $version"
+            exit 1
+          fi
+          echo "Publishing pi-notice@$version"
+
       - run: npm ci
       - run: npm run check
       - run: npm test
-      - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # No NODE_AUTH_TOKEN and no --provenance:
+      # npm detects the OIDC environment and generates provenance automatically.
+      - name: Publish with npm trusted publishing
+        run: npm publish
