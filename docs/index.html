@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>pi-notice · Localization</title>
+		<style>
+			:root {
+				color-scheme: light dark;
+				--bg: #ffffff;
+				--fg: #17181c;
+				--muted: #5b6472;
+				--card: #f4f6f9;
+				--line: #dfe4ec;
+				--accent: #2f6feb;
+			}
+			@media (prefers-color-scheme: dark) {
+				:root {
+					--bg: #0f1115;
+					--fg: #e8ecf3;
+					--muted: #99a3b3;
+					--card: #171a21;
+					--line: #242a34;
+					--accent: #6ea0ff;
+				}
+			}
+			* { box-sizing: border-box; }
+			body {
+				margin: 0;
+				padding: 3rem 1.25rem 4rem;
+				background: var(--bg);
+				color: var(--fg);
+				font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
+					"Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+			}
+			main { max-width: 46rem; margin: 0 auto; }
+			h1 { font-size: 1.9rem; line-height: 1.25; margin: 0 0 0.4rem; }
+			h2 { font-size: 1.1rem; margin: 2.4rem 0 0.6rem; }
+			p { margin: 0.6rem 0; }
+			.lead { color: var(--muted); font-size: 1.02rem; }
+			.grid {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+				gap: 0.75rem;
+				margin: 1.2rem 0 0;
+				padding: 0;
+				list-style: none;
+			}
+			.grid li {
+				background: var(--card);
+				border: 1px solid var(--line);
+				border-radius: 0.7rem;
+				padding: 0.9rem 1rem;
+			}
+			.grid strong { display: block; font-size: 1.05rem; }
+			.grid span { color: var(--muted); font-size: 0.9rem; }
+			.grid code { color: var(--muted); font-size: 0.82rem; }
+			table { width: 100%; border-collapse: collapse; margin-top: 0.8rem; font-size: 0.94rem; }
+			th, td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--line); }
+			th { color: var(--muted); font-weight: 600; }
+			code {
+				font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+				font-size: 0.88em;
+			}
+			pre {
+				background: var(--card);
+				border: 1px solid var(--line);
+				border-radius: 0.7rem;
+				padding: 0.9rem 1rem;
+				overflow-x: auto;
+			}
+			a { color: var(--accent); }
+			.ok { color: #2f9e5f; }
+			footer { margin-top: 3rem; color: var(--muted); font-size: 0.85rem; }
+		</style>
+	</head>
+	<body>
+		<main>
+			<h1>pi-notice · Localization</h1>
+			<p class="lead">
+				Notifications, <code>/notice</code> output, and the TUI settings panel are translated.
+				Help us add your language.
+			</p>
+
+			<h2>Shipped languages</h2>
+			<ul class="grid">
+				<li>
+					<strong>English</strong>
+					<span class="ok">140 / 140 strings · base language</span>
+					<code>en</code>
+				</li>
+				<li>
+					<strong>简体中文</strong>
+					<span class="ok">140 / 140 strings</span>
+					<code>zh-CN</code>
+				</li>
+				<li>
+					<strong>繁體中文</strong>
+					<span class="ok">140 / 140 strings</span>
+					<code>zh-TW</code>
+				</li>
+			</ul>
+
+			<h2>Choose the language</h2>
+			<pre><code># environment
+PI_NOTICE_LOCALE=zh-TW pi
+
+# config file (~/.pi/agent/pi-notice.json or &lt;project&gt;/.pi/pi-notice.json)
+{ "locale": "zh-TW" }
+
+# inside pi
+/notice locale zh-TW
+/notice            # TUI panel → Language</code></pre>
+
+			<h2>Contribute</h2>
+			<table>
+				<tr><th>Way</th><th>Best for</th></tr>
+				<tr>
+					<td><a href="https://hosted.weblate.org/">Weblate</a></td>
+					<td>Translating in a browser; results arrive as pull requests.</td>
+				</tr>
+				<tr>
+					<td><a href="https://github.com/clevebitr/pi-notice/tree/main/locales">locales/</a></td>
+					<td>Editing JSON directly, or adding a brand new language.</td>
+				</tr>
+			</table>
+
+			<h2>Rules that matter</h2>
+			<p>
+				Keys are flat with dots (<code>notice.settled.done</code>). Keep every
+				<code>{placeholder}</code> intact; CI compares them with English. Missing keys fall
+				back to English instead of breaking a notification. Keys ending in <code>.one</code>
+				are optional English plurals and may be omitted.
+			</p>
+
+			<h2>Verify locally</h2>
+			<pre><code>npm run check:locales   # coverage table, key + placeholder parity
+npm test</code></pre>
+
+			<footer>
+				<a href="https://github.com/clevebitr/pi-notice">github.com/clevebitr/pi-notice</a>
+				· MIT
+			</footer>
+		</main>
+	</body>
+</html>
