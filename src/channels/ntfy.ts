@@ -1,11 +1,19 @@
 import type { Notice, NoticeConfig } from "../types.ts";
 import type { Channel } from "./types.ts";
 
-function mapPriority(config: NoticeConfig, notice: Notice): string {
+/** ntfy's JSON API only accepts an integer priority (1 = min … 5 = max). */
+const NTFY_PRIORITY: Record<"low" | "default" | "high" | "max", number> = {
+	low: 2,
+	default: 3,
+	high: 4,
+	max: 5,
+};
+
+function mapPriority(config: NoticeConfig, notice: Notice): number {
 	if (config.ntfy.priority !== "auto") {
-		return config.ntfy.priority;
+		return NTFY_PRIORITY[config.ntfy.priority];
 	}
-	return notice.urgency === "high" ? "high" : notice.urgency === "low" ? "low" : "default";
+	return notice.urgency === "high" ? NTFY_PRIORITY.high : notice.urgency === "low" ? NTFY_PRIORITY.low : NTFY_PRIORITY.default;
 }
 
 function publishUrl(config: NoticeConfig): string {
