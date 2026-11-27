@@ -50,6 +50,7 @@ test("markdown tables collapse into a compact marker", () => {
 
 test("tables without outer pipes and inside code fences are handled", () => {
 	assert.equal(stripMarkdown("A | B\n--- | ---\n1 | 2"), "[表格 1×2]");
+	assert.equal(stripMarkdown("| A |\n| --- |\n| 1 |\n| 2 |"), "[表格 2×1]");
 	assert.equal(
 		stripMarkdown("```md\n| A | B |\n| --- | --- |\n| 1 | 2 |\n```"),
 		"[代码]",

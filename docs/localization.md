@@ -39,9 +39,9 @@ Traditional Chinese. Unknown languages fall back to English.
 
 | Code | Language | Strings | Status |
 | --- | --- | --- | --- |
-| `en` | English | 177 | base |
-| `zh-CN` | 简体中文 | 177 | complete |
-| `zh-TW` | 繁體中文 | 177 | complete |
+| `en` | English | 178 | base |
+| `zh-CN` | 简体中文 | 178 | complete |
+| `zh-TW` | 繁體中文 | 178 | complete |
 
 Run `npm run check:locales` at any time to print this table from the files.
 

@@ -52,7 +52,7 @@ export function stripAnsi(text: string): string {
 }
 
 /** `| a | b |` with optional outer pipes and an alignment row (`| --- | :---: |`). */
-const TABLE_SEPARATOR = /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/;
+const TABLE_SEPARATOR = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/;
 
 function tableColumnCount(header: string): number {
 	const inner = header.trim().replace(/^\|/, "").replace(/\|$/, "");
@@ -74,7 +74,12 @@ function condenseTables(text: string, t: Translator): string {
 	for (let index = 0; index < lines.length; index += 1) {
 		const header = lines[index] ?? "";
 		const separator = lines[index + 1];
-		if (!header.includes("|") || separator === undefined || !TABLE_SEPARATOR.test(separator)) {
+		if (
+			!header.includes("|") ||
+			separator === undefined ||
+			!separator.includes("|") ||
+			!TABLE_SEPARATOR.test(separator)
+		) {
 			out.push(header);
 			continue;
 		}
