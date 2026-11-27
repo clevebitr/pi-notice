@@ -1,20 +1,25 @@
 # pi-notice
 
-Pi 的通知扩展。在一轮对话结束、等待你回答/确认、todo 进度变化、模型报错或重试、会话重连时，发送一条摘要式系统通知。
+**English** | [简体中文](./README.zh-CN.md)
 
-## 支持平台
+A Pi notification extension. It sends a compact system notification when a turn
+finishes, Pi awaits an answer or confirmation, todo progress changes, the model
+reports an error or retries, or a session reconnects.
 
-| 平台 | 通知方式 | 依赖 |
+## Platforms
+
+| Platform | Notification | Requirement |
 | --- | --- | --- |
-| Windows | 原生 Toast | 无 |
-| macOS | 通知中心 | 无 |
+| Windows | Native toast | None |
+| macOS | Notification Center | None |
 | Linux | `notify-send` | `libnotify` |
-| Android | Termux 通知 | Termux:API + `termux-api` |
-| iOS / 远程 | ntfy 推送（可选） | ntfy App + topic |
+| Android | Termux notification | Termux:API and `termux-api` |
+| iOS / remote | ntfy push (optional) | ntfy application and topic |
 
-`channels: ["auto"]` 会自动选择本机通道：Android Termux 使用 `termux`，其他平台使用 `desktop`。
+`channels: ["auto"]` selects the native channel: `termux` on Android Termux,
+`desktop` on all other platforms.
 
-## 安装
+## Installation
 
 ```bash
 cd /path/to/pi-notice
@@ -22,83 +27,77 @@ npm install
 pi install /path/to/pi-notice
 ```
 
-临时试用：
+Run without installation:
 
 ```bash
 pi -e /path/to/pi-notice/extensions/pi-notice.ts
 ```
 
-## 使用
+## Usage
 
-在 TUI 里输入 `/notice` 会打开设置面板（和 `/config`、`/tools` 同款：方向键移动、输入搜索、
-回车/空格切换、Esc 关闭），每一行改动立即写入配置并生效：
+The `/notice` command opens the settings panel in the TUI. Navigation follows
+the standard settings-list controls: arrow keys move, typing searches, Enter or
+Space toggles, and Esc closes the panel. Each change is written immediately and
+takes effect without restarting Pi.
 
-```text
-pi-notice 通知设置
-  通知总开关                    开
-  事件 · 一轮对话结束            开
-  事件 · 等待回答/确认           开
-  ...
-  通道 · 自动                   开
-  语言                          简体中文
-  重连 · 恢复                   开
-```
-
-不想用面板就用子命令：
+Subcommands provide equivalent control:
 
 ```text
-/notice                     打开设置面板（非 TUI 模式退化为状态输出）
-/notice status              打印状态摘要
-/notice events              逐项查看事件开关
-/notice on | off            开启 / 关闭全部通知
-/notice on settled todo     只开启指定事件
-/notice off ask,retry       关闭指定事件
-/notice toggle todo         切换指定事件
-/notice channels            查看当前通知通道
-/notice channels auto,ntfy  设置通知通道
-/notice reasons resume,new  设置哪些会话事件算“重连”
-/notice locale zh-TW        切换语言（en / zh-CN / zh-TW）
-/notice test                发送测试通知
-/notice reload              重新读取配置文件
-/notice help                完整用法
+/notice                     open the settings panel (prints status outside the TUI)
+/notice status              print a status summary
+/notice events              list every event switch
+/notice on | off            enable or disable all notifications
+/notice on settled todo     enable only the specified events
+/notice off ask,retry       disable the specified events
+/notice toggle todo         toggle the specified events
+/notice channels            show the active channels
+/notice channels auto,ntfy  set the channels
+/notice reasons resume,new  select which session events count as reconnection
+/notice locale zh-TW        switch language (en, zh-CN, zh-TW)
+/notice test                send a test notification
+/notice reload              re-read the configuration files
+/notice help                full usage
 ```
 
-事件名支持英文别名和中文：`settled`(结束/完成)、`ask`(提问/确认)、`todo`(待办/进度)、
-`errors`(错误)、`retry`(重试/恢复)、`session`(重连/会话)，以及 `all`。
+Event names accept English and Chinese aliases: `settled`, `ask`, `todo`,
+`errors`, `retry`, `session`, and `all`. The panel writes to
+`<project>/.pi/pi-notice.json`; use `/notice ... --global` to write the
+user-level configuration.
 
-面板打开时只写入 `<项目>/.pi/pi-notice.json`；需要写到用户级配置时用
-`/notice ... --global`。
+### Write targets
 
-### 修改会写到哪里
-
-| 参数 | 写入位置 |
+| Flag | Destination |
 | --- | --- |
-| 默认（或 `--local`） | `<项目>/.pi/pi-notice.json` |
-| `--global` | `~/.pi/agent/pi-notice.json`（设置 `PI_NOTICE_CONFIG` 时写到该文件） |
-| `--session` / `--temp` | 不落盘，只影响本次运行 |
+| default or `--local` | `<project>/.pi/pi-notice.json` |
+| `--global` | `~/.pi/agent/pi-notice.json`, or `PI_NOTICE_CONFIG` when set |
+| `--session` or `--temp` | memory only; current run only |
 
-写入是深合并的，只改你动过的键，其它配置原样保留。改完立即生效，无需重启。
+Writes are deep merges. Only the modified keys are changed; all other
+configuration is preserved. Changes apply immediately.
 
-当有事件被关闭或整体关闭时，TUI 底部状态栏会提示 `🔔 通知 -todo` / `🔕 通知已关闭`；
-全部默认开启时不占用状态栏。
+When events are disabled or notifications are off, the TUI footer displays
+`🔔 notifications -todo` or `🔕 notifications off`. The footer remains empty at
+default settings.
 
-## 配置
+## Configuration
 
-按顺序读取并合并：
+Files are read and merged in the following order:
 
 1. `~/.pi/agent/pi-notice.json`
-2. `<项目>/.pi/pi-notice.json`
-3. 环境变量（`PI_NOTICE_*`，优先级最高；`/notice status` 会提示哪些变量正在生效）
+2. `<project>/.pi/pi-notice.json`
+3. Environment variables (`PI_NOTICE_*`, highest priority); `/notice status`
+   lists the variables currently in effect
 
-语言按同样思路解析，先命中先用：`locale`（`"auto"` 时跳过）→ `PI_NOTICE_LOCALE` →
-`LC_ALL` / `LC_MESSAGES` → `LANG` → 英文。`zh_CN.UTF-8`、`zh-Hans`、`zh` 都归到简体中文，
-`zh_TW` / `zh-HK` / `zh-Hant` 归到繁体中文。
+Language resolution follows the same order: `locale` (skipped when `"auto"`) →
+`PI_NOTICE_LOCALE` → `LC_ALL` or `LC_MESSAGES` → `LANG` → English.
+`zh_CN.UTF-8`, `zh-Hans`, and `zh` map to Simplified Chinese; `zh_TW`,
+`zh-HK`, and `zh-Hant` map to Traditional Chinese.
 
 ```json
 { "locale": "zh-CN" }
 ```
 
-最小配置：
+Minimal configuration:
 
 ```json
 {
@@ -114,85 +113,122 @@ pi-notice 通知设置
 }
 ```
 
-事件开关：
+Event switches:
 
-| 字段 | 通知时机 | 子命令 |
+| Key | Notification trigger | Subcommand |
 | --- | --- | --- |
-| `settled` | 一轮对话结束 | `/notice off settled` |
-| `ask` | 等待用户回答或确认 | `/notice off ask` |
-| `todo` | todo 状态变化 | `/notice off todo` |
-| `errors` | 模型报错 | `/notice off errors` |
-| `retry` | 自动重试与恢复 | `/notice off retry` |
-| `session` | 会话重连 | `/notice off session` |
+| `settled` | a turn finishes | `/notice off settled` |
+| `ask` | awaiting an answer or confirmation | `/notice off ask` |
+| `todo` | todo progress changes | `/notice off todo` |
+| `errors` | the model reports an error | `/notice off errors` |
+| `retry` | automatic retry and recovery | `/notice off retry` |
+| `session` | a session reconnects | `/notice off session` |
 
-`askActions`（默认 `true`）控制是否把 ask 选项做成通知按钮，不属于事件开关。
+`askActions` (default `true`) controls whether ask options become notification
+buttons and is not an event switch.
 
-整体开关：`{"enabled": false}` 或 `/notice off`。
+Master switch: `{"enabled": false}` or `/notice off`.
 
-## 从通知直接作答（Windows / macOS / Linux）
+## Answering from a notification (Windows, macOS, Linux)
 
-当模型通过 `ask_user_question` 问你单选时，通知里会带上选项按钮，点一下就等于在终端里选了：
+When the model asks a single-select question through `ask_user_question`, the
+notification includes option buttons. Selecting a button is equivalent to
+answering in the terminal.
 
-| 平台 | 按钮数 | 回传方式 |
+| Platform | Buttons | Result delivery |
 | --- | --- | --- |
-| Windows | 3 | SnoreToast 按钮，点击经命名管道回传给 pi 进程 |
+| Windows | 3 | SnoreToast buttons; clicks return to the Pi process over a named pipe |
 | macOS | 3 | terminal-notifier `actions` |
-| Linux | 5 | `notify-send -A`（需 libnotify ≥ 0.7.9） |
-| Termux / ntfy / OSC | 不支持 | 只发带编号选项的普通通知 |
+| Linux | 5 | `notify-send -A` (requires libnotify 0.7.9 or later) |
+| Termux, ntfy, OSC | Not supported | plain notification with numbered options |
 
-- 一条通知 = 一道题；选项超过按钮数时自动分页，最后一个按钮是「更多 →」，正文写「第 1/2 页」。
-- 正文永远列出选项编号和文字，所以即使平台没有按钮也能看懂选项。
-- 多选题目（multiSelect）和「一次问多个问题」不做按钮，通知会提示回终端作答——按钮无法表达这些语义。
-- 点完按钮会走 ask 扩展的 `rpiv:ask-user:answer` 事件；如果答案被拒绝（比如你已经在终端回答过），会再发一条「作答未生效」的提示。
-- 关闭按钮：`{"askActions": false}`、`PI_NOTICE_ASK_ACTIONS=0`，或面板里的「作答 · 从通知直接选择」。
-- **Windows 首次会创建开始菜单快捷方式** `%APPDATA%\Microsoft\Windows\Start Menu\Programs\<desktop.appId>.lnk`（默认 `Pi.lnk`）。Windows 只把带注册 AppID 的通知按钮点击回传给应用；不需要时可删除该快捷方式并把 `askActions` 关掉。
-- 通知横幅会按时消失（SnoreToast 0.7 固定约 7 秒）。横幅内的点击已实测通过；通知中心里的延迟点击走同一管道，但尚未端到端验证，建议在横幅出现时直接点。
+- One notification represents one question. When options exceed the button
+  limit, they are paginated; the final button is "More →" and the body shows
+  "page 1/2".
+- The body always lists the numbered options, so the choices remain readable on
+  platforms without buttons.
+- Multi-select questions and multi-question prompts do not receive buttons; the
+  notification instructs the user to answer in the terminal.
+- A button press emits the ask extension's `rpiv:ask-user:answer` event. A
+  rejected answer produces one follow-up "answer not applied" notification.
+- Buttons can be disabled with `{"askActions": false}`,
+  `PI_NOTICE_ASK_ACTIONS=0`, or the panel row "Ask · answer from notification".
+- **Windows creates a Start Menu shortcut on first use** at
+  `%APPDATA%\Microsoft\Windows\Start Menu\Programs\<desktop.appId>.lnk`
+  (default `Pi.lnk`). Windows routes notification-button clicks only to
+  applications with a registered AppID. Delete the shortcut and disable
+  `askActions` to opt out.
+- SnoreToast 0.7 banners disappear after approximately seven seconds. Clicks on
+  the banner are verified. Delayed clicks from Action Center use the same pipe
+  but are not verified end to end; clicking while the banner is visible is
+  recommended.
 
-## 通知图标
+## Notification icon
 
-默认图标是 Lucide 的 `bell-ring`（ISC 许可）改色的琥珀色铃铛，透明背景，**不使用 Pi 的 logo**，因此可以随包分发。资源在 [`assets/`](./assets)。
+The default icon is an amber bell with a transparent background, based on
+Lucide's `bell-ring` (ISC license). It does not use the Pi logo and is therefore
+redistributable with the package. Assets are located in [`assets/`](./assets).
 
-- **桌面**：默认使用 `assets/pi-notice.png`（Windows 额外使用 `assets/pi-notice.ico` 作为开始菜单快捷方式图标，也就是通知的应用标识）。自定义：`{"desktop": {"icon": "C:/path/icon.png"}}`；Windows 想换应用标识时请提供 `.ico`，否则会回退到内置 ICO。macOS 通过 terminal-notifier 的 `-appIcon` 设置图标，受其限制可能仍显示 Terminal 小图标；Windows 改完快捷方式图标后如果仍看到旧图标，重启一次 Explorer 即可刷新缓存。
-- **Termux**：使用 Android 自带的 drawable 名称，默认 `notifications`。`{"termux": {"icon": "notifications_active"}}` 可换；设为空字符串则不传 `--icon`。
-- **ntfy**：`{"ntfy": {"icon": "https://example.com/icon.png"}}` 会作为 `X-Icon` 头发给客户端（只支持 PNG/JPEG URL）。
-- **OSC**：终端协议本身没有图标位，不支持。
+- **Desktop**: uses `assets/pi-notice.png` by default. On Windows,
+  `assets/pi-notice.ico` is also used as the Start Menu shortcut icon, which is
+  the toast's application identity. Override with
+  `{"desktop": {"icon": "C:/path/icon.png"}}`. Windows requires an `.ico` file
+  to change the application identity; a `.png` falls back to the bundled ICO.
+  macOS sets the icon through terminal-notifier's `-appIcon`; terminal-notifier
+  limitations may still display a small Terminal icon. If Windows continues to
+  display the previous icon, restart Explorer to refresh the icon cache.
+- **Termux**: uses an Android drawable name, `notifications` by default.
+  Override with `{"termux": {"icon": "notifications_active"}}`; an empty string
+  omits `--icon`.
+- **ntfy**: `{"ntfy": {"icon": "https://example.com/icon.png"}}` is sent as the
+  `X-Icon` header. Only PNG and JPEG URLs are supported.
+- **OSC**: the terminal protocol has no icon slot; not supported.
 
-图标基于 Lucide，再分发时请保留 [`assets/LICENSE-lucide.txt`](./assets/LICENSE-lucide.txt)。如果你想换成 Pi 的官方 logo，需要先获得 Earendil 的书面许可，详见[品牌规范](https://github.com/earendil-works/elanor/blob/main/packages/logos/guidelines/template.md)。
+The icon is based on Lucide. Retain
+[`assets/LICENSE-lucide.txt`](./assets/LICENSE-lucide.txt) when redistributing.
+Use of the official Pi logo requires prior written permission from Earendil; see
+the [brand guidelines](https://github.com/earendil-works/elanor/blob/main/packages/logos/guidelines/template.md).
 
-## 多语言
+## Localization
 
-界面文案、通知正文、`/notice` 输出、配置警告、通道错误和运行时日志都来自
-[`locales/`](./locales) 下的 JSON，目前有 English、简体中文、繁體中文三份，缺 key 时回退英文而不会报错。
+Interface text, notification bodies, `/notice` output, configuration warnings,
+channel errors, and runtime logs are stored in the JSON files under
+[`locales/`](./locales). English, Simplified Chinese, and Traditional Chinese
+are currently available. Missing keys fall back to English and do not interrupt
+notification delivery.
 
-- 想加语言：见 [`locales/README.md`](./locales/README.md)（术语表 + 五步流程）。
-- 想在浏览器里翻译：项目按 [Weblate](https://weblate.org/) 配置，说明见
-  [`docs/localization.md`](./docs/localization.md)，本地化落地页源码在
-  [`docs/index.html`](./docs/index.html)（GitHub Actions 自动发布到 Pages）。
-- 本地校验：`npm run check:locales` 会打印覆盖率表并检查 key / 占位符一致性。
+- To add a language, follow [`locales/README.md`](./locales/README.md).
+- Browser-based translation is supported through
+  [Weblate](https://weblate.org/); see
+  [`docs/localization.md`](./docs/localization.md). The landing page source is
+  [`docs/index.html`](./docs/index.html) and is published to Pages by GitHub
+  Actions.
+- Run `npm run check:locales` to print the coverage table and verify key and
+  placeholder parity.
 
-通道：
+Channels:
 
-| 值 | 说明 |
+| Value | Description |
 | --- | --- |
-| `auto` | 自动选择本机通道 |
-| `desktop` | Windows / macOS / Linux |
+| `auto` | select the native channel for the current machine |
+| `desktop` | Windows, macOS, Linux |
 | `termux` | Android Termux |
-| `ntfy` | 远程推送，可用于 iOS |
+| `ntfy` | remote push, usable on iOS |
 
-完整配置见 [`pi-notice.example.json`](./pi-notice.example.json)。
+Full configuration: [`pi-notice.example.json`](./pi-notice.example.json).
 
 ## Android
 
-安装 Termux:API 应用，然后在 Termux 中执行：
+Install the Termux:API application, then run the following in Termux:
 
 ```bash
 pkg install termux-api
-termux-notification --title "Pi" --content "测试"
+termux-notification --title "Pi" --content "test"
 ```
 
-## iOS / 远程推送
+## iOS and remote push
 
-在 iOS 安装 ntfy App 并订阅 topic，然后配置：
+Install the ntfy application on iOS, subscribe to a topic, then configure:
 
 ```json
 {
@@ -203,10 +239,15 @@ termux-notification --title "Pi" --content "测试"
 }
 ```
 
-运行 `/notice test` 验证。
+Run `/notice test` to verify delivery.
 
-## 提示
+## Notes
 
-- 通知正文只包含项目名、状态、耗时、最后回复摘录和 todo 进度，并会自动截断。
-- 回复里的代码块和表格不会原样塞进通知：代码块压成 `[代码]`，表格压成 `[表格 R×C]`，以免把摘录额度耗在排版符号上；正文仍受 `summary.maxReplyChars` / `maxBodyChars` 限制。
-- 支持静默时段、最短通知时长和去重，详见示例配置。
+- The notification body contains the project name, status, duration, last reply
+  excerpt, and todo progress. All fields are truncated automatically.
+- Code blocks and tables in a reply are not copied verbatim. Code becomes
+  `[code]`; tables become `[table R×C]`. This prevents layout syntax from
+  consuming the excerpt budget. The body still obeys `summary.maxReplyChars`
+  and `maxBodyChars`.
+- Quiet hours, minimum notification duration, and de-duplication are supported.
+  See `pi-notice.example.json` for the available keys.
