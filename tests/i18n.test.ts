@@ -16,6 +16,7 @@ import {
 	resolveLocale,
 	setLocale,
 	translate,
+	translatorFor,
 } from "../src/i18n.ts";
 
 const localesDir = fileURLToPath(new URL("../locales/", import.meta.url));
@@ -42,6 +43,12 @@ test("resolveLocale prefers config, then env, then English", () => {
 	assert.equal(resolveLocale(undefined, {}), DEFAULT_LOCALE);
 	// An unknown explicit value must not silently fall back to the environment.
 	assert.equal(resolveLocale("fr", { LANG: "zh_CN.UTF-8" }), "en");
+});
+
+test("translatorFor resolves a config value against the environment", () => {
+	assert.equal(translatorFor("zh-CN")("notice.status.completed"), "完成");
+	assert.equal(translatorFor("auto", { LANG: "zh_TW.UTF-8" })("notice.status.completed"), "完成");
+	assert.equal(translatorFor("auto", {})("notice.status.completed"), "completed");
 });
 
 test("translator interpolates and falls back to English", () => {

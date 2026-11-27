@@ -1,3 +1,4 @@
+import { translatorFor } from "../i18n.ts";
 import type { Notice, NoticeConfig } from "../types.ts";
 import type { Channel } from "./types.ts";
 
@@ -11,14 +12,15 @@ function sanitize(value: string): string {
  * can never corrupt JSON/RPC streams.
  */
 export function createOscChannel(config: NoticeConfig): Channel {
+	const t = translatorFor(config.locale);
 	return {
 		name: "osc",
 		async send(notice: Notice): Promise<void> {
 			if (!config.osc.enabled) {
-				throw new Error("osc.enabled 为 false");
+				throw new Error(t("error.osc.disabled"));
 			}
 			if (!process.stdout.isTTY) {
-				throw new Error("stdout 不是 TTY，跳过 OSC 通知");
+				throw new Error(t("error.osc.notTty"));
 			}
 			const title = sanitize(notice.title);
 			const body = sanitize(notice.body);

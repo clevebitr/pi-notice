@@ -2,6 +2,7 @@ import { createChannels, resolveChannelNames } from "./channels/index.ts";
 import type { Channel } from "./channels/types.ts";
 import type { ChannelResult } from "./channels/types.ts";
 import { isQuietHours } from "./config.ts";
+import { translatorFor, type Translator } from "./i18n.ts";
 import type { Notice, NoticeAction, NoticeConfig } from "./types.ts";
 
 export interface Logger {
@@ -43,6 +44,7 @@ export class NoticeDispatcher {
 	private readonly env: NodeJS.ProcessEnv;
 	private readonly logger: Logger;
 	private readonly injectedChannels?: Channel[];
+	private t: Translator;
 	private enabled: boolean;
 	private recent = new Map<string, number>();
 	private warned = new Set<string>();
@@ -54,11 +56,13 @@ export class NoticeDispatcher {
 		this.logger = options.logger ?? defaultLogger;
 		this.injectedChannels = options.channels;
 		this.enabled = options.enabled ?? options.config.enabled;
+		this.t = translatorFor(options.config.locale, this.env);
 		this.channels = this.injectedChannels ?? createChannels(this.config, this.env);
 	}
 
 	setConfig(config: NoticeConfig): void {
 		this.config = config;
+		this.t = translatorFor(config.locale, this.env);
 		this.channels = this.injectedChannels ?? createChannels(config, this.env);
 	}
 
@@ -101,7 +105,12 @@ export class NoticeDispatcher {
 			return { status: "unsupported" };
 		}
 		if (this.config.debug) {
-			this.logger.debug(`interactive ${notice.kind}: ${actions.map((action) => action.id).join(", ")}`);
+			this.logger.debug(
+				this.t("log.debug.interactive", {
+					kind: notice.kind,
+					actions: actions.map((action) => action.id).join(", "),
+				}),
+			);
 		}
 		try {
 			const actionId = await channel.actions.send(notice, actions);
@@ -110,7 +119,7 @@ export class NoticeDispatcher {
 				: { status: "dismissed" };
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			this.logger.warn(`${channel.name} 交互通知失败: ${message}`);
+			this.logger.warn(this.t("warn.interactiveFailed", { channel: channel.name, error: message }));
 			return { status: "failed", error: message };
 		}
 	}
@@ -136,18 +145,24 @@ export class NoticeDispatcher {
 			if (isQuietHours(this.config)) {
 				const urgent = notice.urgency === "high" && this.config.quietHours.allowUrgent;
 				if (!urgent) {
-					this.debug("quiet hours, skipped", notice.kind);
+					this.debug(this.t("log.debug.quietHours", { kind: notice.kind }));
 					return Promise.resolve([]);
 				}
 			}
 			if (options.key && this.isDuplicate(options.key)) {
-				this.debug("duplicate, skipped", options.key);
+				this.debug(this.t("log.debug.duplicate", { key: options.key }));
 				return Promise.resolve([]);
 			}
 		}
 
 		if (this.config.debug) {
-			this.logger.debug(`send ${notice.kind}: ${notice.title} | ${notice.body.replace(/\n/g, " / ")}`);
+			this.logger.debug(
+				this.t("log.debug.send", {
+					kind: notice.kind,
+					title: notice.title,
+					body: notice.body.replace(/\n/g, " / "),
+				}),
+			);
 		}
 
 		this.chain = this.chain.then(
@@ -183,7 +198,7 @@ export class NoticeDispatcher {
 
 	private async deliver(notice: Notice): Promise<ChannelResult[]> {
 		if (this.channels.length === 0) {
-			this.logger.warn("没有可用的通知通道");
+			this.logger.warn(this.t("warn.noChannels"));
 			return [];
 		}
 		const results = await Promise.all(
@@ -205,7 +220,9 @@ export class NoticeDispatcher {
 				const key = `${result.name}:${result.error}`;
 				if (this.config.debug || !this.warned.has(key)) {
 					this.warned.add(key);
-					this.logger.warn(`${result.name} 发送失败: ${result.error}`);
+					this.logger.warn(
+						this.t("warn.delivery", { channel: result.name, error: result.error ?? "" }),
+					);
 				}
 			}
 		}

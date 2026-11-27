@@ -91,14 +91,27 @@ test("quiet hours allow urgent notifications when configured", async () => {
 test("failed channels are logged, not thrown", async () => {
 	const warnings: string[] = [];
 	const dispatcher = new NoticeDispatcher({
-		config: config(),
+		config: config({ locale: "en" }),
 		channels: [fakeChannel(true)],
 		logger: { debug: () => {}, warn: (...args) => warnings.push(args.join(" ")) },
 	});
 	const results = await dispatcher.send(notice());
 	assert.equal(results[0]?.ok, false);
 	assert.equal(results[0]?.error, "boom");
-	assert.ok(warnings.some((line) => line.includes("desktop 发送失败")));
+	assert.ok(warnings.some((line) => line.includes("desktop delivery failed")));
+});
+
+test("runtime warnings follow the configured language", async () => {
+	const warnings: string[] = [];
+	const dispatcher = new NoticeDispatcher({
+		config: config({ locale: "zh-CN" }),
+		channels: [],
+		env: {},
+		logger: { debug: () => {}, warn: (...args) => warnings.push(args.join(" ")) },
+	});
+	const results = await dispatcher.send(notice());
+	assert.deepEqual(results, []);
+	assert.ok(warnings.some((line) => line.includes("没有可用的通知通道")));
 });
 
 function interactiveChannel(outcome: "selected" | "dismissed" | "throws"): Channel & {

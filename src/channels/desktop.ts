@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import net from "node:net";
 import { dirname, join } from "node:path";
 
+import { translate, translatorFor, type Translator } from "../i18n.ts";
 import type { Notice, NoticeAction, NoticeConfig } from "../types.ts";
 import type { Channel } from "./types.ts";
 
@@ -16,27 +17,31 @@ type NodeNotifier = {
 
 let notifierPromise: Promise<NodeNotifier> | undefined;
 
-async function loadNotifier(): Promise<NodeNotifier> {
+/** Internal marker: a broken module install is a different problem from a missing dependency. */
+const MISSING_NOTIFY_EXPORT = "MISSING_NOTIFY_EXPORT";
+
+async function loadNotifier(t: Translator = translate): Promise<NodeNotifier> {
 	if (!notifierPromise) {
-		notifierPromise = import("node-notifier")
-			.then((module) => {
-				const imported = module as unknown as { default?: NodeNotifier } & NodeNotifier;
-				const notifier = imported.default ?? imported;
-				if (typeof notifier?.notify !== "function") {
-					throw new Error("node-notifier did not export notify()");
-				}
-				return notifier;
-			})
-			.catch((error: unknown) => {
-				notifierPromise = undefined;
-				throw new Error(
-					`无法加载 node-notifier，请先在 pi-notice 包目录运行 npm install: ${
-						error instanceof Error ? error.message : String(error)
-					}`,
-				);
-			});
+		notifierPromise = import("node-notifier").then((module) => {
+			const imported = module as unknown as { default?: NodeNotifier } & NodeNotifier;
+			const notifier = imported.default ?? imported;
+			if (typeof notifier?.notify !== "function") {
+				throw new Error(MISSING_NOTIFY_EXPORT);
+			}
+			return notifier;
+		});
 	}
-	return notifierPromise;
+	try {
+		return await notifierPromise;
+	} catch (error) {
+		notifierPromise = undefined;
+		const message = error instanceof Error ? error.message : String(error);
+		throw new Error(
+			message === MISSING_NOTIFY_EXPORT
+				? t("error.desktop.noNotify")
+				: t("error.desktop.loadNotifier", { error: message }),
+		);
+	}
 }
 
 function desktopOptions(config: NoticeConfig, notice: Notice): Record<string, unknown> {
@@ -200,6 +205,7 @@ export function parseSnoreToastResult(raw: string): Record<string, string> {
 }
 
 function showWindowsActions(
+	t: Translator,
 	config: NoticeConfig,
 	notice: Notice,
 	actions: NoticeAction[],
@@ -259,7 +265,7 @@ function showWindowsActions(
 						return;
 					}
 					if (!registered) {
-						finish(new Error("无法注册 Windows 通知 AppID"));
+						finish(new Error(t("error.desktop.appId")));
 						return;
 					}
 					const child = spawn(exe, buildSnoreToastArgs(config, notice, actions, pipe), {
@@ -325,6 +331,7 @@ function activationValue(response: unknown, metadata: unknown): string | undefin
 }
 
 async function notifyWithActions(
+	t: Translator,
 	config: NoticeConfig,
 	notice: Notice,
 	actions: NoticeAction[],
@@ -333,9 +340,9 @@ async function notifyWithActions(
 		return spawnNotifySend(config, notice, actions);
 	}
 	if (process.platform === "win32") {
-		return showWindowsActions(config, notice, actions);
+		return showWindowsActions(t, config, notice, actions);
 	}
-	const notifier = await loadNotifier();
+	const notifier = await loadNotifier(t);
 	const byLabel = new Map(actions.map((action) => [normalizeLabel(action.label), action.id]));
 	const options = actionOptions(config, notice, actions);
 
@@ -379,16 +386,18 @@ async function notifyWithActions(
 }
 
 export function createDesktopChannel(config: NoticeConfig): Channel {
+	const t = translatorFor(config.locale);
 	return {
 		name: "desktop",
 		// `notify-send -A` on Linux, SnoreToast buttons on Windows, terminal-notifier
 		// actions on macOS: all three report the press back to this process.
 		actions: {
 			maxActions: process.platform === "linux" ? 5 : 3,
-			send: (notice: Notice, actions: NoticeAction[]) => notifyWithActions(config, notice, actions),
+			send: (notice: Notice, actions: NoticeAction[]) =>
+				notifyWithActions(t, config, notice, actions),
 		},
 		async send(notice: Notice): Promise<void> {
-			const notifier = await loadNotifier();
+			const notifier = await loadNotifier(t);
 			await new Promise<void>((resolve, reject) => {
 				let settled = false;
 				const finish = (error?: unknown): void => {

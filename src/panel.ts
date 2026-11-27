@@ -88,15 +88,17 @@ export function buildPanelItems(config: NoticeConfig, t: Translator = defaultTra
 		id: "locale",
 		label: t("panel.row.locale"),
 		description: t("panel.desc.locale"),
-		currentValue: localeLabel(config.locale === "auto" ? "en" : config.locale),
-		values: LOCALES.map((locale) => locale.label),
+		// `auto` follows the environment, so show that instead of a guessed language.
+		currentValue:
+			config.locale === "auto" ? t("common.auto") : localeLabel(config.locale),
+		values: [t("common.auto"), ...LOCALES.map((locale) => locale.label)],
 	});
 
 	for (const reason of SESSION_REASONS) {
 		items.push({
 			id: `reason:${reason}`,
 			label: t(`panel.row.reason.${reason}`),
-			description: reason,
+			description: t(`panel.desc.reason.${reason}`),
 			currentValue: labelFor(config.sessionReasons.includes(reason), t),
 			values: onOff,
 		});
@@ -159,6 +161,9 @@ export function applyPanelItem(
 	}
 
 	if (id === "locale") {
+		if (value === t("common.auto")) {
+			return { locale: "auto" };
+		}
 		const code = LOCALES.find((locale) => locale.label === value || locale.code === value)?.code;
 		return code ? { locale: code } : undefined;
 	}

@@ -1,16 +1,23 @@
 import { loadConfig } from "../src/config.ts";
 import { buildTestNotice, projectLabel } from "../src/format.ts";
+import { setLocale, translate as t } from "../src/i18n.ts";
 import { NoticeDispatcher } from "../src/notify.ts";
 
 const { config, sources, warnings } = loadConfig(process.cwd());
+// Keep the process-wide locale in sync with the config, like the extension does.
+setLocale(config.locale);
 const dispatcher = new NoticeDispatcher({ config });
 const project = projectLabel(process.cwd(), process.env.PI_SESSION_NAME);
-const notice = buildTestNotice(project, dispatcher.channelNames());
+const notice = buildTestNotice(project, dispatcher.channelNames(), t);
 
-console.log(`pi-notice 配置: ${sources.length > 0 ? sources.join(", ") : "默认值"}`);
-console.log(`通道: ${dispatcher.channelNames().join(", ") || "无"}`);
+console.log(
+	t("demo.config", {
+		sources: sources.length > 0 ? sources.join(", ") : t("cmd.status.defaultConfig"),
+	}),
+);
+console.log(t("demo.channels", { channels: dispatcher.channelNames().join(", ") || t("common.none") }));
 for (const warning of warnings) {
-	console.warn(`注意: ${warning}`);
+	console.warn(t("demo.warning", { message: warning }));
 }
 
 const results = await dispatcher.send(notice, { force: true });
@@ -18,6 +25,6 @@ for (const result of results) {
 	console.log(`${result.ok ? "✓" : "✗"} ${result.name}${result.error ? `: ${result.error}` : ""}`);
 }
 if (results.length === 0) {
-	console.error("没有发送任何通知；请检查配置中的 channels。");
+	console.error(t("demo.noNotice"));
 	process.exitCode = 1;
 }

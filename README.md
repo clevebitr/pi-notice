@@ -150,8 +150,8 @@ pi-notice 通知设置
 
 ## 多语言
 
-界面文案、通知正文和 `/notice` 输出都来自 [`locales/`](./locales) 下的 JSON，目前有
-English、简体中文、繁體中文三份，缺 key 时回退英文而不会报错。
+界面文案、通知正文、`/notice` 输出、配置警告、通道错误和运行时日志都来自
+[`locales/`](./locales) 下的 JSON，目前有 English、简体中文、繁體中文三份，缺 key 时回退英文而不会报错。
 
 - 想加语言：见 [`locales/README.md`](./locales/README.md)（术语表 + 五步流程）。
 - 想在浏览器里翻译：项目按 [Weblate](https://weblate.org/) 配置，说明见

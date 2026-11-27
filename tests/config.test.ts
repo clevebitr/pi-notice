@@ -107,6 +107,19 @@ test("malformed config is a warning, not a crash", () => {
 	});
 });
 
+test("config warnings use the language selected by the merged config", () => {
+	withTempConfig(undefined, (dir) => {
+		// The user-level file is malformed, the project file picks the language.
+		writeFileSync(join(dir, "pi-notice.json"), "[]", "utf8");
+		mkdirSync(join(dir, ".pi"), { recursive: true });
+		writeFileSync(join(dir, ".pi", "pi-notice.json"), JSON.stringify({ locale: "zh-CN" }), "utf8");
+		const { config, warnings } = loadConfig(dir, process.env);
+		assert.equal(config.locale, "zh-CN");
+		assert.equal(warnings.length, 1);
+		assert.match(warnings[0] ?? "", /配置应为 JSON 对象/);
+	});
+});
+
 test("quiet hours handle same-day and overnight windows", () => {
 	const config = structuredClone(DEFAULT_CONFIG);
 	config.quietHours = { enabled: true, start: "09:00", end: "17:00", allowUrgent: true };

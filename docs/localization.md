@@ -1,8 +1,9 @@
 # Localization
 
 Pi-notice speaks English, 简体中文, and 繁體中文 out of the box. Every
-user-facing string — notifications, `/notice` output, the TUI settings panel —
-comes from `locales/<code>.json`.
+user-facing string — notifications, `/notice` output, the TUI settings panel,
+config warnings, channel errors and runtime logs — comes from
+`locales/<code>.json`.
 
 This page is also published as a static site from `docs/`; edit
 [`localization.md`](./localization.md) and [`index.html`](./index.html) together.
@@ -38,9 +39,9 @@ Traditional Chinese. Unknown languages fall back to English.
 
 | Code | Language | Strings | Status |
 | --- | --- | --- | --- |
-| `en` | English | 151 | base |
-| `zh-CN` | 简体中文 | 151 | complete |
-| `zh-TW` | 繁體中文 | 151 | complete |
+| `en` | English | 177 | base |
+| `zh-CN` | 简体中文 | 177 | complete |
+| `zh-TW` | 繁體中文 | 177 | complete |
 
 Run `npm run check:locales` at any time to print this table from the files.
 
@@ -88,6 +89,10 @@ Adding a language also needs:
 - Notification bodies that quote the model: replies, error messages, todo task
   titles. Those arrive in whatever language you talk to the model in.
 - `PI_NOTICE_*` environment variable names.
+- Underlying platform errors appended to a translated message (for example the
+  JSON parser's `error.message` in a config warning).
+- Maintainer scripts (`scripts/check-locales.ts`) keep English output so CI logs
+  stay greppable; `scripts/demo.ts` follows the configured language.
 
 ## Why `.one` keys exist
 

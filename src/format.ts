@@ -1,4 +1,4 @@
-import { translate as defaultTranslate, type Translator } from "./i18n.ts";
+import { getLocale, translate as defaultTranslate, type Translator } from "./i18n.ts";
 import type { Notice, NoticeConfig } from "./types.ts";
 
 export interface TodoTask {
@@ -51,14 +51,61 @@ export function stripAnsi(text: string): string {
 		.replace(/\u001b[@-Z\\-_]/g, "");
 }
 
+/** `| a | b |` with optional outer pipes and an alignment row (`| --- | :---: |`). */
+const TABLE_SEPARATOR = /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/;
+
+function tableColumnCount(header: string): number {
+	const inner = header.trim().replace(/^\|/, "").replace(/\|$/, "");
+	if (!inner.trim()) {
+		return 0;
+	}
+	// A literal `\|` inside a cell is not a cell boundary.
+	return inner.split(/(?<!\\)\|/).length;
+}
+
+/**
+ * Replace every Markdown table with a compact marker. Notifications cannot show
+ * a table, and leaving the pipes and separator row in the text used to eat the
+ * whole reply budget before any prose.
+ */
+function condenseTables(text: string, t: Translator): string {
+	const lines = text.split("\n");
+	const out: string[] = [];
+	for (let index = 0; index < lines.length; index += 1) {
+		const header = lines[index] ?? "";
+		const separator = lines[index + 1];
+		if (!header.includes("|") || separator === undefined || !TABLE_SEPARATOR.test(separator)) {
+			out.push(header);
+			continue;
+		}
+		const columns = tableColumnCount(header);
+		if (columns === 0) {
+			out.push(header);
+			continue;
+		}
+		let rows = 0;
+		let next = index + 2;
+		while (next < lines.length) {
+			const row = lines[next] ?? "";
+			if (!row.trim() || !row.includes("|")) {
+				break;
+			}
+			rows += 1;
+			next += 1;
+		}
+		out.push(t("summary.table", { rows, columns }));
+		index = next - 1;
+	}
+	return out.join("\n");
+}
+
 /** Collapse Markdown into a short single-line summary. */
-export function stripMarkdown(
-	text: string,
-	codeLabel: string = defaultTranslate("summary.code"),
-): string {
+export function stripMarkdown(text: string, t: Translator = defaultTranslate): string {
 	let out = stripAnsi(text).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
-	out = out.replace(/```[\s\S]*?```/g, ` ${codeLabel} `);
-	out = out.replace(/~~~[\s\S]*?~~~/g, ` ${codeLabel} `);
+	out = out.replace(/```[\s\S]*?```/g, ` ${t("summary.code")} `);
+	out = out.replace(/~~~[\s\S]*?~~~/g, ` ${t("summary.code")} `);
+	// Tables are condensed before inline formatting so their cells do not leak.
+	out = condenseTables(out, t);
 	out = out.replace(/!\[[^\]]*]\([^)]*\)/g, "");
 	out = out.replace(/\[([^\]]+)]\([^)]*\)/g, "$1");
 	out = out.replace(/<[^>]+>/g, "");
@@ -90,7 +137,7 @@ export function summarizeReply(
 	maxChars: number,
 	t: Translator = defaultTranslate,
 ): string | undefined {
-	const summary = stripMarkdown(text, t("summary.code"));
+	const summary = stripMarkdown(text, t);
 	if (!summary) {
 		return undefined;
 	}
@@ -563,7 +610,7 @@ export function buildTestNotice(
 			[
 				t("notice.test.project", { project }),
 				t("notice.test.channels", { channels: channels.join(", ") || t("notice.test.none") }),
-				t("notice.test.time", { time: new Date().toLocaleString() }),
+				t("notice.test.time", { time: new Date().toLocaleString(getLocale()) }),
 			],
 			220,
 		),

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
-import { normalizeLocale } from "./i18n.ts";
+import { normalizeLocale, translatorFor } from "./i18n.ts";
 import type {
 	ChannelChoice,
 	ChannelName,
@@ -76,6 +76,12 @@ export const DEFAULT_CONFIG: NoticeConfig = {
 };
 
 type JsonObject = Record<string, unknown>;
+
+/** A warning collected while reading config, translated once the locale is known. */
+interface ConfigWarning {
+	key: string;
+	vars?: Record<string, string | number>;
+}
 
 function isPlainObject(value: unknown): value is JsonObject {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -234,7 +240,7 @@ export function configPaths(cwd: string, env: NodeJS.ProcessEnv = process.env): 
 	return [...new Set(paths)];
 }
 
-function readConfigFile(path: string, warnings: string[]): JsonObject | undefined {
+function readConfigFile(path: string, warnings: ConfigWarning[]): JsonObject | undefined {
 	if (!existsSync(path)) {
 		return undefined;
 	}
@@ -242,12 +248,18 @@ function readConfigFile(path: string, warnings: string[]): JsonObject | undefine
 		const text = readFileSync(path, "utf8");
 		const parsed: unknown = JSON.parse(text);
 		if (!isPlainObject(parsed)) {
-			warnings.push(`${path}: expected a JSON object`);
+			warnings.push({ key: "warn.configNotObject", vars: { path } });
 			return undefined;
 		}
 		return parsed;
 	} catch (error) {
-		warnings.push(`${path}: ${error instanceof Error ? error.message : String(error)}`);
+		warnings.push({
+			key: "warn.configReadFailed",
+			vars: {
+				path,
+				error: error instanceof Error ? error.message : String(error),
+			},
+		});
 		return undefined;
 	}
 }
@@ -350,11 +362,11 @@ function applyEnv(config: NoticeConfig, env: NodeJS.ProcessEnv): NoticeConfig {
  */
 export function loadConfig(cwd: string, env: NodeJS.ProcessEnv = process.env): LoadedConfig {
 	const sources: string[] = [];
-	const warnings: string[] = [];
+	const collected: ConfigWarning[] = [];
 	let merged: JsonObject = clone(DEFAULT_CONFIG) as unknown as JsonObject;
 
 	for (const path of configPaths(cwd, env)) {
-		const file = readConfigFile(path, warnings);
+		const file = readConfigFile(path, collected);
 		if (file) {
 			merged = mergeConfig(merged, file) as JsonObject;
 			sources.push(path);
@@ -362,6 +374,9 @@ export function loadConfig(cwd: string, env: NodeJS.ProcessEnv = process.env): L
 	}
 
 	const config = applyEnv(normalizeConfig(merged), env);
+	// Translate only now: the file itself may select the language.
+	const t = translatorFor(config.locale, env);
+	const warnings = collected.map((warning) => t(warning.key, warning.vars));
 	return { config, sources, warnings };
 }
 

@@ -34,6 +34,38 @@ test("stripMarkdown removes code, links and emphasis", () => {
 	assert.equal(output.includes("[代码]"), true);
 });
 
+test("markdown tables collapse into a compact marker", () => {
+	const input = [
+		"## 结果",
+		"",
+		"| 文件 | 改动 | 说明 |",
+		"| --- | ---: | --- |",
+		"| src/a.ts | +12 | 修复 |",
+		"| src/b.ts | -3 | 清理 |",
+		"",
+		"测试通过，已提交。",
+	].join("\n");
+	assert.equal(stripMarkdown(input), "结果 [表格 2×3] 测试通过，已提交。");
+});
+
+test("tables without outer pipes and inside code fences are handled", () => {
+	assert.equal(stripMarkdown("A | B\n--- | ---\n1 | 2"), "[表格 1×2]");
+	assert.equal(
+		stripMarkdown("```md\n| A | B |\n| --- | --- |\n| 1 | 2 |\n```"),
+		"[代码]",
+	);
+});
+
+test("a table no longer consumes the reply budget", () => {
+	const rows = Array.from({ length: 20 }, (_, index) => `| src/f${index}.ts | +1 | 修复 ${index} |`);
+	const reply = ["| 文件 | 改动 | 说明 |", "| --- | ---: | --- |", ...rows, "", "最终结论：全部完成。"].join(
+		"\n",
+	);
+	const summary = summarizeReply(reply, 140);
+	assert.ok(summary?.includes("最终结论"));
+	assert.equal(summary?.includes("---"), false);
+});
+
 test("summarizeReply truncates by code points", () => {
 	assert.equal(summarizeReply("😀😀😀😀", 3), "😀😀…");
 	assert.equal(truncate("abc", 0), "");

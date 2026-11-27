@@ -1,3 +1,4 @@
+import { translatorFor } from "../i18n.ts";
 import type { ChannelName, NoticeConfig } from "../types.ts";
 import { createDesktopChannel } from "./desktop.ts";
 import { createNtfyChannel } from "./ntfy.ts";
@@ -27,6 +28,7 @@ export function resolveChannelNames(
 ): ResolvedChannels {
 	const names: ChannelName[] = [];
 	const warnings: string[] = [];
+	const t = translatorFor(config.locale, env);
 	for (const choice of config.channels) {
 		const name = choice === "auto" ? autoChannel(env) : choice;
 		if (!names.includes(name)) {
@@ -34,10 +36,10 @@ export function resolveChannelNames(
 		}
 	}
 	if (names.includes("ntfy") && !config.ntfy.topic.trim()) {
-		warnings.push("ntfy 已在 channels 中启用，但 ntfy.topic 为空");
+		warnings.push(t("warn.ntfyTopic"));
 	}
 	if (names.includes("osc") && !config.osc.enabled) {
-		warnings.push("osc 已在 channels 中启用，但 osc.enabled 为 false");
+		warnings.push(t("warn.oscDisabled"));
 	}
 	return { names, warnings };
 }

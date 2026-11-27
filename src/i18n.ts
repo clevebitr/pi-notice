@@ -164,6 +164,18 @@ function interpolate(template: string, vars?: Record<string, string | number>): 
 	);
 }
 
+/**
+ * Translator for a configured locale value. `auto` (and an unknown value)
+ * follows the environment, exactly like {@link resolveLocale}. Modules that
+ * only hold a `NoticeConfig` use this instead of the process-wide translator.
+ */
+export function translatorFor(
+	locale?: string,
+	env: NodeJS.ProcessEnv = process.env,
+): Translator {
+	return createTranslator(resolveLocale(locale, env));
+}
+
 /** Build a translator for one locale. Missing keys fall back to English, then to the key. */
 export function createTranslator(locale: string = DEFAULT_LOCALE): Translator {
 	const code = normalizeLocale(locale) ?? DEFAULT_LOCALE;

@@ -1,3 +1,4 @@
+import { translatorFor } from "../i18n.ts";
 import type { Notice, NoticeConfig } from "../types.ts";
 import type { Channel } from "./types.ts";
 
@@ -23,11 +24,12 @@ function publishUrl(config: NoticeConfig): string {
 }
 
 export function createNtfyChannel(config: NoticeConfig): Channel {
+	const t = translatorFor(config.locale);
 	return {
 		name: "ntfy",
 		async send(notice: Notice): Promise<void> {
 			if (!config.ntfy.topic.trim()) {
-				throw new Error("ntfy.topic 未配置（或设置 PI_NOTICE_NTFY_TOPIC）");
+				throw new Error(t("error.ntfy.noTopic"));
 			}
 			const headers: Record<string, string> = {
 				"Content-Type": "application/json",
@@ -49,7 +51,14 @@ export function createNtfyChannel(config: NoticeConfig): Channel {
 			});
 			if (!response.ok) {
 				const detail = await response.text().catch(() => "");
-				throw new Error(`ntfy 返回 HTTP ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ""}`);
+				throw new Error(
+					detail
+						? t("error.ntfy.httpDetail", {
+							status: response.status,
+							detail: detail.slice(0, 200),
+						})
+						: t("error.ntfy.http", { status: response.status }),
+				);
 			}
 		},
 	};

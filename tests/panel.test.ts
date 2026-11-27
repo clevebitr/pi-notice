@@ -31,7 +31,13 @@ test("panel lists master switch, events, channels, language and reasons", () => 
 	assert.ok(ids.includes("reason:resume"));
 	assert.equal(items.find((item) => item.id === "enabled")?.currentValue, "On");
 	assert.equal(items.find((item) => item.id === "event:todo")?.currentValue, "On");
-	assert.equal(items.find((item) => item.id === "locale")?.currentValue, "English");
+	assert.equal(items.find((item) => item.id === "locale")?.currentValue, "Auto");
+	assert.deepEqual(items.find((item) => item.id === "locale")?.values, [
+		"Auto",
+		"English",
+		"简体中文",
+		"繁體中文",
+	]);
 });
 
 test("panel reflects disabled events, channels and reasons", () => {
@@ -62,6 +68,7 @@ test("toggling rows produces config patches", () => {
 	assert.deepEqual(applyPanelItem("event:todo", "On", base, t), { events: { todo: true } });
 	assert.deepEqual(applyPanelItem("locale", "繁體中文", base, t), { locale: "zh-TW" });
 	assert.deepEqual(applyPanelItem("locale", "zh-CN", base, t), { locale: "zh-CN" });
+	assert.deepEqual(applyPanelItem("locale", "Auto", base, t), { locale: "auto" });
 	assert.deepEqual(applyPanelItem("reason:resume", "Off", base, t), { sessionReasons: [] });
 	assert.deepEqual(applyPanelItem("reason:new", "On", base, t), { sessionReasons: ["new", "resume"] });
 	assert.equal(applyPanelItem("locale", "Klingon", base, t), undefined);

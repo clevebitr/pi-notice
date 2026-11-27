@@ -64,6 +64,14 @@ test("unconfigured ntfy is reported as a warning", () => {
 	assert.ok(resolved.warnings.some((warning) => warning.includes("ntfy.topic")));
 });
 
+test("channel warnings follow the configured language", () => {
+	const resolved = resolveChannelNames(
+		config({ channels: ["ntfy"], locale: "zh-CN" }),
+		{},
+	);
+	assert.ok(resolved.warnings.some((warning) => warning.includes("ntfy.topic 为空")));
+});
+
 test("ntfy publishes JSON with title, body, priority and bearer token", async () => {
 	let captured:
 		| { url?: string; body?: Record<string, unknown>; authorization?: string; contentType?: string }

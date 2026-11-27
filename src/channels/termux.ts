@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import { translatorFor } from "../i18n.ts";
 import type { Notice, NoticeConfig } from "../types.ts";
 import type { Channel } from "./types.ts";
 
@@ -79,13 +80,12 @@ async function isAvailable(command: string): Promise<boolean> {
 }
 
 export function createTermuxChannel(config: NoticeConfig): Channel {
+	const t = translatorFor(config.locale);
 	return {
 		name: "termux",
 		async send(notice: Notice): Promise<void> {
 			if (!(await isAvailable(config.termux.command))) {
-				throw new Error(
-					`未找到 ${config.termux.command}。请先安装 Termux:API 应用并执行 pkg install termux-api`,
-				);
+				throw new Error(t("error.termux.missing", { command: config.termux.command }));
 			}
 			try {
 				await runTermux(config.termux.command, buildTermuxArgs(config, notice));

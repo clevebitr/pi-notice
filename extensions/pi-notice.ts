@@ -322,7 +322,7 @@ export default function piNotice(pi: ExtensionAPI, deps: NoticeDeps = {}): void 
 		}
 
 		if (message.stopReason === "error") {
-			state.lastError = message.errorMessage || "模型请求失败";
+			state.lastError = message.errorMessage || t("notice.error.generic");
 			return;
 		}
 		if (message.stopReason === "aborted") {
@@ -347,7 +347,7 @@ export default function piNotice(pi: ExtensionAPI, deps: NoticeDeps = {}): void 
 		const willRetry = Boolean((event as { willRetry?: boolean }).willRetry);
 		const error =
 			last?.stopReason === "error"
-				? last.errorMessage || state.lastError || "模型请求失败"
+				? last.errorMessage || state.lastError || t("notice.error.generic")
 				: state.lastError;
 		if (!error) {
 			return;
@@ -695,6 +695,10 @@ export default function piNotice(pi: ExtensionAPI, deps: NoticeDeps = {}): void 
 		});
 	};
 
+	// The command description is captured at registration time, so resolve the
+	// language before registering it. `session_start` reloads with the real cwd.
+	setLocale(loadConfig(state.cwd, env()).config.locale, env());
+
 	pi.registerCommand("notice", {
 		description: t("cmd.desc"),
 		handler: async (args, ctx) => {
@@ -900,7 +904,7 @@ export default function piNotice(pi: ExtensionAPI, deps: NoticeDeps = {}): void 
 						[
 							`${t("panel.row.locale")}: ${localeLabel(getLocale())}`,
 							LOCALES.map((locale) => `${locale.label} (${locale.code})`).join(", "),
-							"/notice locale zh-CN",
+							t("cmd.locale.hint"),
 						].join("\n"),
 					);
 					return;
