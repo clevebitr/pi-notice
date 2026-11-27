@@ -1,11 +1,13 @@
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import net from "node:net";
-import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+import { dirname, extname, join } from "node:path";
 
 import { translate, translatorFor, type Translator } from "../i18n.ts";
+import { desktopIconPath, windowsShortcutIconPath } from "../icons.ts";
 import type { Notice, NoticeAction, NoticeConfig } from "../types.ts";
 import type { Channel } from "./types.ts";
 
@@ -61,8 +63,12 @@ function desktopOptions(config: NoticeConfig, notice: Notice): Record<string, un
 		}
 	} else if (process.platform === "darwin") {
 		options.sound = config.desktop.sound ? "Glass" : false;
+		// node-notifier maps `icon` to terminal-notifier's `-appIcon`.
+		options.icon = desktopIconPath(config);
 	} else {
 		options.sound = config.desktop.sound;
+		// notify-send shows this as the notification icon.
+		options.icon = desktopIconPath(config);
 	}
 
 	return options;
@@ -105,6 +111,8 @@ export function buildNotifySendActionArgs(
 	const args = [
 		"--app-name",
 		"Pi",
+		"--icon",
+		desktopIconPath(config),
 		"--urgency",
 		notice.urgency === "high" ? "critical" : notice.urgency === "low" ? "low" : "normal",
 		"--wait",
@@ -138,11 +146,14 @@ export function windowsShortcutPath(appId: string): string {
  * AppUserModelID has a Start Menu shortcut. SnoreToast can write that shortcut
  * itself (`-install <name> <application> <appID>`), so do it once per appID.
  */
-export async function ensureToastShortcut(appId: string): Promise<boolean> {
+export async function ensureToastShortcut(appId: string, iconPath?: string): Promise<boolean> {
 	if (!appId.trim() || process.platform !== "win32") {
 		return false;
 	}
 	if (existsSync(windowsShortcutPath(appId))) {
+		if (iconPath) {
+			await patchShortcutIcon(appId, iconPath);
+		}
 		return true;
 	}
 	const exe = snoretoastPath();
@@ -158,7 +169,64 @@ export async function ensureToastShortcut(appId: string): Promise<boolean> {
 	} catch {
 		return false;
 	}
-	return existsSync(windowsShortcutPath(appId));
+	if (!existsSync(windowsShortcutPath(appId))) {
+		return false;
+	}
+	if (iconPath) {
+		await patchShortcutIcon(appId, iconPath);
+	}
+	return true;
+}
+
+const patchedShortcutIcons = new Set<string>();
+
+/**
+ * SnoreToast's `-install` points the shortcut at its own exe, so the toast
+ * identity keeps SnoreToast's icon. Patch the standard IconLocation property
+ * (the AppUserModelID property SnoreToast sets stays intact).
+ */
+async function patchShortcutIcon(appId: string, iconPath: string): Promise<void> {
+	const key = `${appId}:${iconPath}`;
+	if (patchedShortcutIcons.has(key)) {
+		return;
+	}
+	const shortcut = windowsShortcutPath(appId);
+	if (!existsSync(shortcut) || !existsSync(iconPath)) {
+		return;
+	}
+	// Copy the icon out of the package so a later npm update cannot break the
+	// shortcut's icon reference.
+	const cacheDir = join(
+		process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"),
+		"pi-notice",
+	);
+	const cachedIcon = join(cacheDir, `icon${extname(iconPath) || ".ico"}`);
+	try {
+		mkdirSync(cacheDir, { recursive: true });
+		copyFileSync(iconPath, cachedIcon);
+	} catch {
+		// If the copy fails, the original path is still a valid IconLocation.
+	}
+	const iconLocation = existsSync(cachedIcon) ? cachedIcon : iconPath;
+	const quote = (value: string): string => `'${value.replace(/'/g, "''")}'`;
+	const script = [
+		`$s = (New-Object -ComObject WScript.Shell).CreateShortcut(${quote(shortcut)})`,
+		`$s.IconLocation = ${quote(`${iconLocation},0`)}`,
+		"$s.Save()",
+	].join("; ");
+	try {
+		await new Promise<void>((resolve, reject) => {
+			execFile(
+				"powershell.exe",
+				["-NoProfile", "-NonInteractive", "-Command", script],
+				{ timeout: 10_000, windowsHide: true },
+				(error) => (error ? reject(error) : resolve()),
+			);
+		});
+		patchedShortcutIcons.add(key);
+	} catch {
+		// A non-default icon is cosmetic; never fail a notification over it.
+	}
 }
 
 /** SnoreToast joins button labels with `;`, so labels must not contain one. */
@@ -258,7 +326,7 @@ function showWindowsActions(
 		server.listen(pipe, () => {
 			// The open pipe must not keep a short-lived script alive.
 			server.unref?.();
-			void ensureToastShortcut(config.desktop.appId)
+			void ensureToastShortcut(config.desktop.appId, windowsShortcutIconPath(config))
 				.catch(() => false)
 				.then((registered) => {
 					if (settled) {
@@ -397,6 +465,14 @@ export function createDesktopChannel(config: NoticeConfig): Channel {
 				notifyWithActions(t, config, notice, actions),
 		},
 		async send(notice: Notice): Promise<void> {
+			if (process.platform === "win32") {
+				// The toast's app identity comes from the AUMID shortcut, not from
+				// node-notifier's `icon` (which is a content image on Windows).
+				await ensureToastShortcut(
+					config.desktop.appId,
+					windowsShortcutIconPath(config),
+				).catch(() => false);
+			}
 			const notifier = await loadNotifier(t);
 			await new Promise<void>((resolve, reject) => {
 				let settled = false;

@@ -42,6 +42,9 @@ export function buildTermuxArgs(config: NoticeConfig, notice: Notice): string[] 
 	if (config.termux.action) {
 		args.push("--action", config.termux.action);
 	}
+	if (config.termux.icon) {
+		args.push("--icon", config.termux.icon);
+	}
 	return args;
 }
 

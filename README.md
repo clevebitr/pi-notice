@@ -148,6 +148,17 @@ pi-notice 通知设置
 - **Windows 首次会创建开始菜单快捷方式** `%APPDATA%\Microsoft\Windows\Start Menu\Programs\<desktop.appId>.lnk`（默认 `Pi.lnk`）。Windows 只把带注册 AppID 的通知按钮点击回传给应用；不需要时可删除该快捷方式并把 `askActions` 关掉。
 - 通知横幅会按时消失（SnoreToast 0.7 固定约 7 秒）。横幅内的点击已实测通过；通知中心里的延迟点击走同一管道，但尚未端到端验证，建议在横幅出现时直接点。
 
+## 通知图标
+
+默认图标是 Lucide 的 `bell-ring`（ISC 许可）改色的琥珀色铃铛，透明背景，**不使用 Pi 的 logo**，因此可以随包分发。资源在 [`assets/`](./assets)。
+
+- **桌面**：默认使用 `assets/pi-notice.png`（Windows 额外使用 `assets/pi-notice.ico` 作为开始菜单快捷方式图标，也就是通知的应用标识）。自定义：`{"desktop": {"icon": "C:/path/icon.png"}}`；Windows 想换应用标识时请提供 `.ico`，否则会回退到内置 ICO。macOS 通过 terminal-notifier 的 `-appIcon` 设置图标，受其限制可能仍显示 Terminal 小图标；Windows 改完快捷方式图标后如果仍看到旧图标，重启一次 Explorer 即可刷新缓存。
+- **Termux**：使用 Android 自带的 drawable 名称，默认 `notifications`。`{"termux": {"icon": "notifications_active"}}` 可换；设为空字符串则不传 `--icon`。
+- **ntfy**：`{"ntfy": {"icon": "https://example.com/icon.png"}}` 会作为 `X-Icon` 头发给客户端（只支持 PNG/JPEG URL）。
+- **OSC**：终端协议本身没有图标位，不支持。
+
+图标基于 Lucide，再分发时请保留 [`assets/LICENSE-lucide.txt`](./assets/LICENSE-lucide.txt)。如果你想换成 Pi 的官方 logo，需要先获得 Earendil 的书面许可，详见[品牌规范](https://github.com/earendil-works/elanor/blob/main/packages/logos/guidelines/template.md)。
+
 ## 多语言
 
 界面文案、通知正文、`/notice` 输出、配置警告、通道错误和运行时日志都来自

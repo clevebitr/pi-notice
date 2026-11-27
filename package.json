@@ -17,6 +17,7 @@
   "files": [
     "extensions",
     "src",
+    "assets",
     "locales",
     "scripts",
     "docs",

@@ -66,6 +66,8 @@ export interface DesktopConfig {
 	appId: string;
 	/** Seconds the toast stays visible on Windows. */
 	timeoutSeconds: number;
+	/** Optional PNG/ICO path. Defaults to the bundled pi-notice icon. */
+	icon?: string;
 }
 
 export interface TermuxConfig {
@@ -79,6 +81,8 @@ export interface TermuxConfig {
 	group: string;
 	/** Optional shell command executed when the Android notification is tapped. */
 	action?: string;
+	/** Android drawable name for the status-bar icon (Termux:API). */
+	icon?: string;
 }
 
 export interface NtfyConfig {
@@ -88,6 +92,8 @@ export interface NtfyConfig {
 	token: string;
 	priority: "auto" | "low" | "default" | "high" | "max";
 	tags: string[];
+	/** Optional URL for ntfy's `X-Icon` header (PNG/JPEG). */
+	icon?: string;
 }
 
 export interface OscConfig {

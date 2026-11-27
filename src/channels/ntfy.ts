@@ -37,6 +37,9 @@ export function createNtfyChannel(config: NoticeConfig): Channel {
 			if (config.ntfy.token.trim()) {
 				headers.Authorization = `Bearer ${config.ntfy.token.trim()}`;
 			}
+			if (config.ntfy.icon?.trim()) {
+				headers["X-Icon"] = config.ntfy.icon.trim();
+			}
 			const response = await fetch(publishUrl(config), {
 				method: "POST",
 				headers,

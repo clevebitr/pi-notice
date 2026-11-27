@@ -31,7 +31,26 @@ test("defaults are usable", () => {
 	assert.equal(config.enabled, true);
 	assert.deepEqual(config.channels, ["auto"]);
 	assert.equal(config.events.settled, true);
+	assert.equal(config.termux.icon, "notifications");
+	assert.equal(config.desktop.icon, undefined);
+	assert.equal(config.ntfy.icon, undefined);
 	assert.equal(warnings.length, 0);
+});
+
+test("icon settings normalize and can be disabled", () => {
+	withTempConfig(
+		{
+			desktop: { icon: "  ~/icons/pi-notice.ico  " },
+			termux: { icon: "" },
+			ntfy: { icon: "https://example.com/pi-notice.png" },
+		},
+		(dir) => {
+			const { config } = loadConfig(dir, process.env);
+			assert.equal(config.desktop.icon, "~/icons/pi-notice.ico");
+			assert.equal(config.termux.icon, undefined);
+			assert.equal(config.ntfy.icon, "https://example.com/pi-notice.png");
+		},
+	);
 });
 
 test("deep merge keeps nested defaults and replaces arrays", () => {

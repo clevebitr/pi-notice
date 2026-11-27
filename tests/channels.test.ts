@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -7,6 +8,7 @@ import { DEFAULT_CONFIG } from "../src/config.ts";
 import { resolveChannelNames } from "../src/channels/index.ts";
 import { buildTermuxArgs } from "../src/channels/termux.ts";
 import { createNtfyChannel } from "../src/channels/ntfy.ts";
+import { desktopIconPath, windowsShortcutIconPath } from "../src/icons.ts";
 import type { Notice, NoticeConfig } from "../src/types.ts";
 
 function config(overrides: Partial<NoticeConfig> = {}): NoticeConfig {
@@ -27,8 +29,41 @@ test("termux args use core flags and high priority", () => {
 	assert.equal(args[args.indexOf("--priority") + 1], "high");
 	assert.equal(args[args.indexOf("--id") + 1], "pi-notice");
 	assert.equal(args[args.indexOf("--group") + 1], "pi-notice");
+	assert.equal(args[args.indexOf("--icon") + 1], "notifications");
 	assert.ok(args.includes("--sound"));
 	assert.equal(args[args.indexOf("--vibrate") + 1], "200");
+});
+
+test("termux icon can be changed or disabled", () => {
+	const custom = buildTermuxArgs(
+		config({ termux: { ...DEFAULT_CONFIG.termux, icon: "notifications_active" } }),
+		ask,
+	);
+	assert.equal(custom[custom.indexOf("--icon") + 1], "notifications_active");
+
+	const disabled = buildTermuxArgs(
+		config({ termux: { ...DEFAULT_CONFIG.termux, icon: undefined } }),
+		ask,
+	);
+	assert.equal(disabled.includes("--icon"), false);
+});
+
+test("bundled desktop icons exist and custom paths are resolved", () => {
+	assert.ok(existsSync(desktopIconPath(config())));
+	assert.ok(existsSync(windowsShortcutIconPath(config())));
+	assert.match(desktopIconPath(config()), /assets[\\/]pi-notice\.png$/);
+	assert.match(windowsShortcutIconPath(config()), /assets[\\/]pi-notice\.ico$/);
+
+	const custom = config({ desktop: { ...DEFAULT_CONFIG.desktop, icon: "brand/my-icon.png" } });
+	assert.match(desktopIconPath(custom), /brand[\\/]my-icon\.png$/);
+	// Windows shortcuts only accept .ico/.exe/.dll; a PNG falls back to the bundle.
+	assert.match(windowsShortcutIconPath(custom), /pi-notice\.ico$/);
+	assert.match(
+		windowsShortcutIconPath(
+			config({ desktop: { ...DEFAULT_CONFIG.desktop, icon: "brand/my-icon.ico" } }),
+		),
+		/brand[\\/]my-icon\.ico$/,
+	);
 });
 
 test("termux priority can be pinned and optional flags removed", () => {
@@ -74,7 +109,13 @@ test("channel warnings follow the configured language", () => {
 
 test("ntfy publishes JSON with title, body, priority and bearer token", async () => {
 	let captured:
-		| { url?: string; body?: Record<string, unknown>; authorization?: string; contentType?: string }
+		| {
+				url?: string;
+				body?: Record<string, unknown>;
+				authorization?: string;
+				contentType?: string;
+				icon?: string;
+		  }
 		| undefined;
 	const server = createServer((request, response) => {
 		const chunks: Buffer[] = [];
@@ -85,6 +126,7 @@ test("ntfy publishes JSON with title, body, priority and bearer token", async ()
 				body: JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>,
 				authorization: request.headers.authorization,
 				contentType: request.headers["content-type"],
+				icon: request.headers["x-icon"] as string | undefined,
 			};
 			response.writeHead(200);
 			response.end("ok");
@@ -101,6 +143,7 @@ test("ntfy publishes JSON with title, body, priority and bearer token", async ()
 					topic: "pi-test",
 					token: "secret",
 					tags: ["terminal"],
+					icon: "https://example.com/pi-notice.png",
 				},
 			}),
 		);
@@ -115,6 +158,7 @@ test("ntfy publishes JSON with title, body, priority and bearer token", async ()
 		assert.deepEqual(captured?.body?.tags, ["terminal", "ask"]);
 		assert.equal(captured?.authorization, "Bearer secret");
 		assert.equal(captured?.contentType, "application/json");
+		assert.equal(captured?.icon, "https://example.com/pi-notice.png");
 	} finally {
 		await new Promise<void>((resolve, reject) =>
 			server.close((error) => (error ? reject(error) : resolve())),
@@ -168,6 +212,7 @@ test("desktop action options carry labels and wait for a click", async () => {
 
 	const args = buildNotifySendActionArgs(config(), ask, actions);
 	assert.ok(args.includes("--wait"));
+	assert.match(args[args.indexOf("--icon") + 1] ?? "", /assets[\\/]pi-notice\.png$/);
 	assert.equal(args[args.indexOf("--urgency") + 1], "critical");
 	assert.equal(args[args.indexOf("-t") + 1], String(DEFAULT_CONFIG.desktop.actionsTimeoutSeconds * 1000));
 	assert.deepEqual(

@@ -37,7 +37,8 @@
     "sound": true,
     "appId": "Pi",
     "timeoutSeconds": 8,
-    "actionsTimeoutSeconds": 300
+    "actionsTimeoutSeconds": 300,
+    "icon": ""
   },
   "termux": {
     "command": "termux-notification",
@@ -47,7 +48,8 @@
     "vibrate": true,
     "vibrateMs": 200,
     "group": "pi-notice",
-    "action": "am start -n com.termux/.app.TermuxActivity"
+    "action": "am start -n com.termux/.app.TermuxActivity",
+    "icon": "notifications"
   },
   "ntfy": {
     "url": "https://ntfy.sh",
@@ -56,7 +58,8 @@
     "priority": "auto",
     "tags": [
       "robot"
-    ]
+    ],
+    "icon": ""
   },
   "osc": {
     "enabled": false

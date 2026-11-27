@@ -60,6 +60,7 @@ export const DEFAULT_CONFIG: NoticeConfig = {
 		vibrate: true,
 		vibrateMs: 200,
 		group: "pi-notice",
+		icon: "notifications",
 	},
 	ntfy: {
 		url: "https://ntfy.sh",
@@ -67,6 +68,7 @@ export const DEFAULT_CONFIG: NoticeConfig = {
 		token: "",
 		priority: "auto",
 		tags: ["robot"],
+		icon: "",
 	},
 	osc: {
 		enabled: false,
@@ -185,6 +187,7 @@ function normalizeConfig(input: unknown): NoticeConfig {
 		appId: asString(desktop.appId, "Pi"),
 		timeoutSeconds: clampNumber(desktop.timeoutSeconds, 8, 1, 60),
 		actionsTimeoutSeconds: clampNumber(desktop.actionsTimeoutSeconds, 300, 10, 3600),
+		icon: asString(desktop.icon, "").trim() || undefined,
 	};
 
 	const termux: JsonObject = isPlainObject(config.termux) ? config.termux : {};
@@ -197,6 +200,7 @@ function normalizeConfig(input: unknown): NoticeConfig {
 		vibrateMs: clampNumber(termux.vibrateMs, 200, 0, 5000),
 		group: asString(termux.group, "pi-notice"),
 		action: typeof termux.action === "string" && termux.action.trim() ? termux.action : undefined,
+		icon: asString(termux.icon, "notifications").trim() || undefined,
 	};
 
 	const ntfy: JsonObject = isPlainObject(config.ntfy) ? config.ntfy : {};
@@ -208,6 +212,7 @@ function normalizeConfig(input: unknown): NoticeConfig {
 		tags: Array.isArray(ntfy.tags)
 			? (ntfy.tags as unknown[]).filter((value): value is string => typeof value === "string")
 			: ["robot"],
+		icon: asString(ntfy.icon, "").trim() || undefined,
 	};
 
 	const osc: JsonObject = isPlainObject(config.osc) ? config.osc : {};
